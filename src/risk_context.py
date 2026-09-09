@@ -40,14 +40,21 @@ METADATA_PATH = Path("models/failure_risk_rf.meta.json")
 # the top 5% of all hours for that fleet.
 RISK_BANDS = {"high": 0.20, "medium": 0.02}
 
-# Features whose percentile-vs-own-history is worth reporting, in importance
-# order from the fitted model (see docs/model_selection.md §9).
+# Drivers worth reporting, ordered by the fitted model's combined importance
+# (absolute + relative counterpart). See docs/model_selection.md §9.
+#
+# Each driver reports its absolute value, that machine's own median, its
+# percentile against its own history, AND — where the model uses one — the
+# `_rel` ratio the model actually keys on. The explanation layer and the model
+# now reason over the same quantity instead of merely adjacent ones.
 DRIVER_FEATURES = [
     ("vib_roll_std_24h", "24h vibration volatility", "mm/s"),
-    ("temp_roll_std_24h", "24h temperature volatility", "°C"),
-    ("vib_roll_std_6h", "6h vibration volatility", "mm/s"),
-    ("vib_roll_mean_24h", "24h mean vibration", "mm/s"),
     ("temp_roll_mean_24h", "24h mean temperature", "°C"),
+    ("temp_roll_std_24h", "24h temperature volatility", "°C"),
+    ("temp_roll_mean_6h", "6h mean temperature", "°C"),
+    ("vib_roll_mean_24h", "24h mean vibration", "mm/s"),
+    ("vib_roll_mean_6h", "6h mean vibration", "mm/s"),
+    ("vib_roll_std_6h", "6h vibration volatility", "mm/s"),
     ("run_hours_since_maintenance", "hours since last maintenance", "h"),
 ]
 
@@ -112,14 +119,20 @@ def machine_snapshot(scored: pd.DataFrame, machine_id: str, at=None) -> dict:
 
     drivers = []
     for col, label, unit in DRIVER_FEATURES:
-        drivers.append({
+        entry = {
             "feature": col,
             "label": label,
             "unit": unit,
             "value": round(float(row[col]), 3),
             "machine_median": round(float(hist[col].median()), 3),
             "percentile_vs_own_history": round(_pct_rank(hist[col], row[col]), 1),
-        })
+        }
+        rel_col = f"{col}_rel"
+        if rel_col in row.index:
+            # The ratio the model itself uses: 1.0 = at this machine's own
+            # normal, 2.0 = twice its usual level.
+            entry["times_own_normal"] = round(float(row[rel_col]), 2)
+        drivers.append(entry)
 
     def risk_at(hours_back):
         past = hist[hist["timestamp"] <= row["timestamp"] - pd.Timedelta(hours=hours_back)]

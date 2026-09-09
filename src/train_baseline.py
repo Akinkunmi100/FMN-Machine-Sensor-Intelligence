@@ -79,6 +79,13 @@ def build_models(y_train: pd.Series):
             n_estimators=300, max_depth=8, class_weight="balanced",
             random_state=42, n_jobs=-1,
         ),
+        # The shipped configuration. Kept alongside the untuned variant above
+        # so the family comparison stays like-for-like (every other candidate
+        # is untuned) while still showing what actually ships.
+        "Random Forest (balanced, leaf=20) [SHIPPED]": RandomForestClassifier(
+            n_estimators=300, max_depth=8, min_samples_leaf=20,
+            class_weight="balanced", random_state=42, n_jobs=-1,
+        ),
         "HistGradientBoosting (balanced)": HistGradientBoostingClassifier(
             max_depth=6, class_weight="balanced", random_state=42
         ),

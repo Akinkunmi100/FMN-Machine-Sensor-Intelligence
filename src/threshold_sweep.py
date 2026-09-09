@@ -12,7 +12,11 @@ from features import build_dataset
 from train_baseline import CSV_PATH, HORIZON_HOURS, build_models, fit_predict, make_splits
 
 THRESHOLDS = [0.5, 0.3, 0.2]
-MODELS_TO_SWEEP = ["Random Forest (balanced)", "Logistic Regression (balanced)"]
+MODELS_TO_SWEEP = [
+    "Random Forest (balanced, leaf=20) [SHIPPED]",
+    "Random Forest (balanced)",
+    "Logistic Regression (balanced)",
+]
 
 
 def confusion_at(y_test, proba, threshold):

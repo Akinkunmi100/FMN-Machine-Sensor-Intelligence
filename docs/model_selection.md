@@ -1,10 +1,18 @@
 # Model Selection — Predictive Maintenance
 
-**Decision: Random Forest (balanced class weights), alert threshold 0.20.**
+**Decision: Random Forest (balanced class weights, `min_samples_leaf=20`), 26 features
+including per-machine relative ratios, alert threshold 0.20.**
 
 Every number below was produced by code in this repo and can be reproduced with
 the commands in [How to reproduce](#how-to-reproduce). Nothing here is asserted
 without the run that produced it.
+
+> **Revised after Phase 2.** The originally shipped model used 19 absolute
+> features with `min_samples_leaf=1`. A deliberate re-examination found a
+> materially better configuration — same event capture, **30% fewer false
+> alarms**. Section 10 documents what changed, what didn't, and the two things
+> I initially got wrong. The earlier version is preserved in git history at
+> commit `74b9e60`.
 
 ---
 
@@ -33,6 +41,9 @@ hours we flag, how many are real, across every possible threshold. The naive flo
 is the positive rate itself (0.009–0.020 depending on split), which gives an honest
 baseline to beat rather than a 99.96% number that means nothing.
 
+**AUC-PR still does not decide the model.** It ranks; it does not tell you whether
+a breakdown got a warning. Sections 6 and 10 both turn on that distinction.
+
 ## 3. Validation design
 
 Hourly readings within a machine are strongly autocorrelated, so random k-fold
@@ -56,20 +67,23 @@ through the *target*, which no amount of careful feature engineering would catch
 Every split purges training rows whose horizon window crosses its cutoff
 (`embargo()` in `src/train_baseline.py`).
 
-### Leakage guard on maintenance resets
+### Leakage guard
 
 Phase 0 found that **77.3% of the 22 maintenance resets coincide with or immediately
 follow the failure they would appear to predict** — resets are largely *reactive*.
-Any forward-looking feature built on `run_hours_since_maintenance` ("hours until next
-reset") would be a near-copy of the label.
+Any forward-looking feature built on `run_hours_since_maintenance` would be a
+near-copy of the label.
 
-Only backward-looking use is permitted. This is enforced, not just intended:
-`src/test_no_leakage.py` recomputes every feature on truncated data and asserts that
-values for already-past rows are unchanged. A feature that peeks forward changes when
-the future is removed; these do not.
+The relative features added in this revision raise the stakes: they use *expanding*
+per-machine statistics, exactly the construction where causality quietly breaks. The
+baseline is `shift(1).expanding(min_periods=24).median()` — strictly backward-only.
+
+This is enforced, not intended. `src/test_no_leakage.py` recomputes every feature on
+truncated data and asserts that values for already-past rows are unchanged. A feature
+that peeks forward changes when the future is removed; these do not.
 
 ```
-OK: all 19 features are causal (unchanged across 25926 rows when future data
+OK: all 26 features are causal (unchanged across 25926 rows when future data
 is truncated).
 ```
 
@@ -81,7 +95,14 @@ label, and zero positives means nothing to learn or score against.
 
 So that they remain *scoreable*, `machine_id` is deliberately **not** a feature. The
 model reads only physically-grounded signals, so it generalises to machines it has
-never seen. Their scores are real predictions, but **unvalidated** — see Limitations.
+never seen.
+
+**A relative feature needs 24 hours of a machine's own history before it has a
+baseline; below that it falls back to `1.0` ("at its own normal") and the model
+leans on the absolute features instead.** That fallback is a design choice, not a
+measured benefit — with zero recorded failures on those machines, nothing about
+their accuracy can be validated. Their scores are real predictions, but
+**unvalidated**. See Limitations.
 
 ## 4. Class imbalance
 
@@ -96,173 +117,206 @@ physically occur.
 
 ## 5. Candidate comparison (AUC-PR)
 
-| Model | Fold 1 (Mar) | Fold 2 (Apr) | Primary | Interpretability |
-|---|---|---|---|---|
-| Naive baseline (never alert) | 0.0086 | 0.0180 | 0.0198 | — |
-| Logistic Regression | 0.0301 | 0.3438 | 0.3957 | High — readable coefficients |
-| Decision Tree (depth 4) | 0.2227 | 0.3397 | 0.3136 | High — visualisable rules |
-| **Random Forest** | **0.4016** | 0.5773 | **0.6411** | Medium — feature importances |
-| HistGradientBoosting | 0.3499 | 0.5730 | 0.5516 | Medium |
-| XGBoost | 0.3492 | 0.5334 | 0.4758 | Medium |
-| Ensemble — averaged probability | 0.3896 | **0.6059** | 0.5834 | Low |
-| Ensemble — majority vote | 0.2538 | 0.3906 | 0.4341 | Low |
+All candidates evaluated on the same 26 features. Every model except the shipped
+Random Forest is left at its original untuned settings, so the *family* comparison
+stays like-for-like; the tuned configuration is shown as its own row.
 
-**Random Forest beats the naive baseline by 32x on the primary split** (0.641 vs
-0.020) and leads every split except fold 2, where the averaged ensemble edges ahead.
+| Model | Fold 1 (Mar) | Fold 2 (Apr) | Primary | Mean | Interpretability |
+|---|---|---|---|---|---|
+| Naive baseline (never alert) | 0.0086 | 0.0180 | 0.0198 | 0.0155 | — |
+| Logistic Regression | 0.5711 | 0.6575 | 0.6705 | 0.6330 | High |
+| Decision Tree (depth 4) | 0.1265 | 0.4042 | 0.3688 | 0.2998 | High |
+| Random Forest (`leaf=1`) | 0.5351 | **0.7126** | 0.6757 | 0.6411 | Medium |
+| **Random Forest (`leaf=20`) — SHIPPED** | **0.5561** | 0.7052 | **0.7241** | **0.6618** | Medium |
+| HistGradientBoosting | 0.1878 | 0.6215 | 0.4908 | 0.4334 | Medium |
+| XGBoost | 0.3202 | 0.5995 | 0.4559 | 0.4585 | Medium |
+| Ensemble — averaged probability | 0.5030 | 0.6423 | 0.5884 | 0.5779 | Low |
+| Ensemble — majority vote | 0.1244 | 0.4349 | 0.4076 | 0.3223 | Low |
+
+**The shipped model beats the naive baseline by 37× on the primary split**
+(0.7241 vs 0.0198).
 
 Three findings worth stating plainly:
 
-- **Boosting did not help.** HistGradientBoosting and XGBoost both trail Random
-  Forest on all three splits. Further variants (LightGBM, CatBoost, AdaBoost) were
-  deliberately not added — with 164 positive test rows, more candidates buy noise,
-  not signal.
+- **Boosting got *worse* with relative features.** HistGradientBoosting fell from
+  0.5516 to 0.4908 on the primary split, XGBoost from 0.4758 to 0.4559. The gain
+  from per-machine normalisation is specific to Random Forest and Logistic
+  Regression. Further boosting variants were not added — with 164 positive test
+  rows, more candidates buy noise, not signal.
 - **No stacked ensemble was built.** With 17 real events, a trained meta-learner
   would fit which model got lucky on which failure, not a real pattern. The two
-  training-free combinations tested don't beat the best single model on 2 of 3
-  splits, and majority vote is clearly worst — binarising at 0.5 before combining
-  discards the ranking information AUC-PR rewards.
-- **Logistic Regression is unstable.** At 0.0301 on fold 1 it is barely above the
-  0.0086 naive floor. Trained on the least data, the interpretable model essentially
-  stops working — which matters, because the system will be retrained as history
-  accumulates.
+  training-free combinations tested lose to the best single model, and majority
+  vote is clearly worst — binarising at 0.5 before combining discards the ranking
+  information AUC-PR rewards.
+- **Logistic Regression was rescued by the relative features** — see Section 7. It
+  is now genuinely competitive on ranking, and the reason it previously failed
+  turns out to be diagnostic rather than incidental.
 
-## 6. Why row-level metrics chose the wrong model
+## 6. Why row-level metrics choose the wrong model
 
-At threshold 0.5 on the primary split, Logistic Regression looks *safer*:
-
-| Model | TP | FP | FN | Recall | Precision |
-|---|---|---|---|---|---|
-| Logistic Regression @ 0.5 | 162 | 557 | **2** | 0.988 | 0.225 |
-| Random Forest @ 0.5 | 115 | 119 | 49 | 0.701 | 0.491 |
-| Random Forest @ 0.2 | 140 | 230 | 24 | 0.854 | 0.378 |
-
-Two missed hours versus forty-nine looks decisive. **It isn't** — those are *hours*,
-not breakdowns. The 164 positive rows are 7 real failures, each inflated into a
-24-hour window. Missing 49 hours of a 24-hour warning window says nothing about
-whether the plant got warned.
-
+The 164 positive rows in the primary test set are **7 real breakdowns**, each
+inflated into a 24-hour window. Row-level counts measure hours, not breakdowns.
 Re-scored on what operations actually experiences — did *any* alert fire before each
 real failure, and how many separate false alarms did operators have to chase
-(consecutive alert hours on one machine = **one** episode, not 24):
+(consecutive alert hours on one machine = **one** episode, not 24) — the ranking
+changes:
 
-| Split | Random Forest @ 0.2 | Logistic Regression @ 0.3 |
-|---|---|---|
-| Primary (23 d) | **7/7 caught**, 22 false episodes | 7/7 caught, 34 false episodes |
-| Fold 1 (31 d) | **4/4 caught**, 6 false episodes | **3/4 caught**, 27 false episodes |
-| Fold 2 (29 d) | **8/8 caught**, 26 false episodes | 8/8 caught, 70 false episodes |
-| **Total** | **19/19 events, 54 false episodes** | 18/19 events, 131 false episodes |
+| Model | Primary (23 d) | Fold 1 (31 d) | Fold 2 (29 d) | **Total** |
+|---|---|---|---|---|
+| **RF `leaf=20` @ 0.20 — SHIPPED** | 7/7 · 14 eps | 4/4 · 9 eps | 8/8 · 15 eps | **19/19 · 38 eps** |
+| Logistic Regression @ 0.30 | 7/7 · 18 eps | **3/4** · 6 eps | 8/8 · 15 eps | 18/19 · 39 eps |
+| RF `leaf=1` @ 0.20 | 7/7 · 22 eps | **1/4** · 3 eps | 8/8 · 23 eps | 16/19 · 48 eps |
 
-Random Forest catches **every failure in all three windows with 59% fewer false
-alarms**. Logistic Regression — the supposedly safer model — is the one that misses
-an event, on the same fold where its AUC-PR collapsed.
+**Warning time: median 24.0 hours, minimum observed 16 hours.** Enough to move a
+repair into a planned window rather than reacting to a breakdown. (The previous
+model's minimum was 22h — the tightest warning shrank by six hours, which is the
+one measurable regression in this revision. 16 hours is still most of two shifts.)
 
-**Median warning time: 24.0 hours; minimum observed: 22 hours.** A full shift of
-notice, enough to move the repair into a planned window instead of reacting to a
-breakdown.
+## 7. The interpretability question, reopened and re-closed
 
-## 7. Threshold: 0.20
+Phase 2 rejected Logistic Regression partly because it **collapsed to 0.0301 on
+fold 1** — barely above the 0.0086 naive floor. With relative features it scores
+**0.5711 on that same fold, beating the Random Forest there.**
 
-Selected on the primary split, then **verified on both CV folds before adoption** —
-tuning a threshold on the window you then report it on is soft leakage of the same
-family this document has been guarding against.
+That collapse was diagnostic, not incidental. *A linear model cannot express "high
+for this machine" from absolute values.* Given ratios, it can. The feature change
+fixed the exact weakness that disqualified it.
 
-| Threshold | Events caught (primary) | False episodes | Note |
-|---|---|---|---|
-| 0.5 | 6/7 — misses MCH-213 (2026-04-08) | 22 | |
-| 0.3 | 6/7 — misses MCH-213 | 23 | |
-| **0.20** | **7/7** | **22** | Catches MCH-213 at no extra alarm cost |
+This matters because the project rule is to prefer interpretable models **where
+performance is comparable**. The gap closed from 0.641-vs-0.396 to 0.662-vs-0.633 —
+close enough that the rule deserved a real hearing rather than a restatement of the
+earlier verdict.
 
-Dropping from 0.3 to 0.2 converts a missed breakdown into a caught one while the
-false-alarm episode count stays flat (23 → 22). The extra alert *hours* land inside
-warning windows that were already firing, so operators see no additional noise.
+It still doesn't bite, for two reasons that only appear at the operational level:
 
-Held up out of sample: 4/4 on fold 1 (6 false episodes) and 8/8 on fold 2 (26).
+1. **Logistic Regression misses a breakdown** (18/19 vs 19/19), on the same fold
+   where it previously collapsed.
+2. **Its minimum lead time is 7 hours against the Random Forest's 16.** A
+   seven-hour warning barely permits scheduling; it forces a reactive repair.
 
-## 8. Why this decision does not depend on cost assumptions
+Comparable ranking, materially worse operational behaviour. The Random Forest holds.
 
-Normally this call requires pricing unplanned downtime against an unnecessary
-inspection — a ratio this dataset does not contain and which is not invented here.
+## 8. Threshold: 0.20
 
-**It isn't needed.** Random Forest @ 0.2 is better on *both* axes simultaneously —
-more failures caught *and* fewer false alarms. When one option dominates, the
-exchange rate between the two costs is irrelevant; every ratio gives the same answer.
+| Threshold | Events caught (primary) | False episodes | Row recall | Row precision |
+|---|---|---|---|---|
+| 0.50 | 6/7 — misses MCH-213 | 14 | 0.744 | 0.632 |
+| 0.30 | 7/7 | 18 | 0.951 | 0.455 |
+| **0.20** | **7/7** | **14** | 0.951 | 0.402 |
 
-The supporting argument is about trust rather than arithmetic. At ~0.45 false
-episodes per machine per week, the plant sees roughly one false alarm per day across
-15 machines. Logistic Regression's 1.13/machine/week on fold 2 is where operators
-begin dismissing alerts — and a model whose warnings get ignored has an effective
-recall of zero regardless of its metrics.
+Confirmed out of sample before adoption: 4/4 on fold 1, 8/8 on fold 2.
 
-### On the interpretability preference
-
-The project rule is to prefer interpretable models *where performance is comparable*.
-At 0.641 vs 0.396 AUC-PR, with a missed event and a near-baseline fold, performance
-is not comparable. Operator trust is instead delivered by the Phase 3 explanation
-layer, grounded in each machine's real sensor values, plus the feature importances
-below — not by reading regression coefficients, which no one on a plant floor does.
+**The threshold now sits mid-plateau rather than on a cliff edge.** The previous
+model held perfect capture only up to 0.20 — one step further, at 0.25, it dropped
+an event. The shipped model holds 19/19 from 0.05 through 0.25, bottoming out at
+38 episodes across 0.20–0.25. That margin on both sides is a robustness gain
+against distribution drift, independent of the false-alarm improvement, and it
+means the signed-off bands carry over unchanged.
 
 ## 9. What the model actually keys on
 
 | Feature | Importance |
 |---|---|
-| `vib_roll_std_24h` | 0.258 |
-| `temp_roll_std_24h` | 0.204 |
-| `vib_roll_std_6h` | 0.122 |
-| `vib_roll_mean_24h` | 0.106 |
-| `vib_roll_mean_6h` | 0.072 |
-| `vibration_mm_s` (raw) | 0.060 |
-| `temp_roll_mean_24h` | 0.057 |
-| `temp_roll_std_6h` | 0.051 |
-| `temp_roll_mean_6h` | 0.037 |
-| `temperature_c` (raw) | 0.017 |
-| `run_hours_since_maintenance` | 0.007 |
-| `recently_reset_24h` | 0.0004 |
-| `line_*` (all three) | 0.0006 combined |
+| `temp_roll_mean_24h_rel` | 0.188 |
+| `vib_roll_std_24h_rel` | 0.157 |
+| `temp_roll_mean_6h_rel` | 0.154 |
+| `vib_roll_std_24h` | 0.115 |
+| `temp_roll_std_24h` | 0.102 |
+| `vib_roll_mean_24h_rel` | 0.076 |
+| `temp_roll_std_24h_rel` | 0.061 |
+| `vib_roll_mean_6h_rel` | 0.053 |
+| `run_hours_since_maintenance` | 0.001 |
+| `recently_reset_24h` | 0.00001 |
+| `line_*` (all three) | 0.00003 combined |
 
-**Instability predicts failure, not absolute level.** Rolling standard deviations
-alone carry ~63% of total importance; raw instantaneous readings contribute under 8%
-combined. Machines don't fail because they are hot — they fail because they start
-running *erratically*. Vibration features outweigh temperature roughly 62% to 37%.
+**Relative features carry 70.7% of total importance.** Offered both views of the
+same signal, the model overwhelmingly prefers "how unusual is this *for this
+machine*" over "how large is this in absolute terms". That is the single clearest
+result in this document, and it is why the revision was worth making.
 
-Two results worth flagging honestly:
+Two further results worth flagging:
 
-- **`run_hours_since_maintenance` is nearly irrelevant (0.007).** The intuitive
-  "wear since last service" hypothesis is not what drives these predictions. This is
-  also a quiet vindication of the leakage guard: restricted to causal use the feature
-  is almost worthless, whereas a forward-looking version would have looked
-  spectacularly predictive by encoding the reactive reset that *follows* the failure.
-- **`line` contributes ~0.0006.** Production line carries no failure signal, which
-  strengthens the cold-start case: the model is not leaning on plant topology it
-  cannot verify for a new machine.
+- **`run_hours_since_maintenance` fell to 0.001** (from 0.007). The intuitive "wear
+  since last service" hypothesis is not merely weak — it is essentially unused. This
+  also quietly vindicates the leakage guard: restricted to causal use the feature is
+  worthless, whereas a forward-looking version would have looked spectacularly
+  predictive by encoding the reactive reset that *follows* the breakdown.
+- **Temperature now slightly outweighs vibration** (52.3% vs 47.6%), reversing the
+  62/37 split under absolute-only features. Temperature's absolute level varies a
+  lot between machines, which buried its signal; normalised per machine, it becomes
+  the single strongest driver.
 
-## 10. Limitations
+## 10. What the re-examination changed
+
+Four decisions were re-tested after Phase 2. Two held, two did not.
+
+| Decision | Verdict |
+|---|---|
+| Random Forest over LogReg / boosting | **Held** — re-confirmed on new features, at event level |
+| Bands 0.02 / 0.20 | **Held** — verified against walk-forward OOS, not just in-sample |
+| Absolute-only features | **Changed** — added 7 per-machine relative ratios |
+| `min_samples_leaf=1` | **Changed** — 20 |
+
+Two things I initially got wrong, recorded because the reasoning is the useful part:
+
+- **I suspected the bands were derived from a contaminated distribution** — computed
+  on the final refit model, which has seen every failure. Walk-forward out-of-sample
+  scores cleared them: 90.52% of OOS hours score exactly 0.0000 against 92.99%
+  in-sample, and the watch tier actually gets *more* useful out-of-sample (2.21% vs
+  1.16%). The suspicion was worth checking and wrong.
+- **I briefly preferred `min_samples_leaf=20` on its AUC-PR gain alone** (+0.076).
+  At matched event capture it is *worse* on its own — **+17 false episodes**. That is
+  the same error Section 6 exists to prevent, made against my own tuning rather than
+  against a rival model. It only wins in combination with the relative features.
+
+**Neither change helps alone.** Regularisation alone costs +17 episodes; relative
+features alone cost +8; together they gain −16. Ratio features are higher-variance
+and need the heavier leaf constraint, and the constraint needs richer features to
+exploit. Testing them one at a time would have rejected both. The clearest evidence
+is fold 1, where `leaf=1` on the new features catches only **1 of 4** breakdowns
+against `leaf=20`'s 4 of 4.
+
+I also motivated relative features partly as a cold-start fix. **That claim is
+withdrawn** — the measured gain is on established machines only, and cannot be
+otherwise, since the cold-start machines have no failures against which recall could
+be measured. Below 24 hours of history the features fall back to `1.0`, so new
+machines get *less* signal from them, not more.
+
+## 11. Limitations
 
 - **19 events is a small sample.** 19/19 is a real result over ~83 days of held-out
-  testing, not a guarantee. It should be described to the plant team as
-  "caught every failure in testing", never as "never misses".
-- **Roughly 3 of 4 alert episodes are false** (row-level precision 0.378). Acceptable
-  given the cost asymmetry, but the plant team must be told upfront so the
-  expectation is calibrated from day one.
+  testing, not a guarantee. Describe it to the plant team as "caught every failure in
+  testing", never as "never misses".
+- **Roughly 3 of 4 alert episodes are false** (row precision 0.402 at threshold
+  0.20). Acceptable given the cost asymmetry, but the plant team must be told upfront
+  so the expectation is calibrated from day one.
+- **Minimum lead time fell from 22h to 16h** in this revision — the one measurable
+  regression against the previous model, accepted for a 30% cut in false alarms.
 - **Cold-start machines are unvalidated, not validated-good.** MCH-300/301 have zero
-  failures, so their event-level recall is *unmeasurable*. Their dashboard scores
-  should carry a visible lower-confidence marker.
-- **Historical scores in the app will be in-sample.** The shipped artifact is refit
-  on all established history, so re-scoring that same history for the trend view
-  produces optimistic risk curves. **Phase 4 should generate walk-forward
-  out-of-sample scores for the trend chart** rather than scoring history with the
-  final model.
+  failures, so their event-level recall is *unmeasurable*. Their dashboard scores need
+  a visible lower-confidence marker, and the relative-feature fallback makes them more
+  reliant on absolute features than any established machine.
+- **Historical scores in the app will be in-sample.** The shipped artifact is refit on
+  all established history, so re-scoring that history produces optimistic curves —
+  MCH-213 scores 0.987 at a moment the honest held-out model gave 0.225. **The Phase 4
+  trend chart must use walk-forward out-of-sample scores**, which cover 52.9% of
+  history (nothing before 2026-02-26, since earlier training windows contain fewer
+  than two failures).
 - **Missingness treatment is forward-fill**, justified by ~99% of gaps being isolated
-  single hours (max run 2). A future feed with longer outages would need revisiting.
-- **Failures are near-uniform across machines** (1–2 each), so the model cannot learn
-  machine-specific failure modes — by design, since that is also what lets it score
-  new machines.
+  single hours (max run 2). A feed with longer outages would need revisiting.
+- **Hyperparameters were tuned by inspecting held-out splits.** The defence is that
+  the winning configuration leads on folds 1 and 2 independently *and* the primary
+  split — untouched by that choice — confirms it (+0.083 AUC-PR, 22→14 episodes). A
+  fully nested protocol would be stricter.
 
-## 11. The shipped artifact
+## 12. The shipped artifact
 
 | | |
 |---|---|
 | File | `models/failure_risk_rf.joblib` |
 | Metadata | `models/failure_risk_rf.meta.json` |
+| Model | RandomForest, 300 trees, `max_depth=8`, `min_samples_leaf=20`, balanced |
+| Features | 26 (19 absolute + 7 per-machine relative) |
 | Trained on | 42,850 rows, 404 positive (0.943%), 15 established machines |
 | Date range | 2026-01-01 → 2026-04-29 |
 | Threshold | 0.20 |
@@ -276,7 +330,7 @@ The app loads this file; nothing is retrained at request time.
 ```bash
 pip install -r requirements.txt
 python src/data_exploration.py      # Phase 0 findings
-python src/test_no_leakage.py       # causality guard (must pass)
+python src/test_no_leakage.py       # causality guard over all 26 features (must pass)
 python src/train_baseline.py        # candidate comparison table
 python src/threshold_sweep.py       # threshold sweep
 python src/event_level_analysis.py  # event-level analysis + generalisation check

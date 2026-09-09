@@ -20,6 +20,7 @@ from train_baseline import CSV_PATH, HORIZON_HOURS, build_models, fit_predict, m
 from features import build_dataset
 
 SWEEP = {
+    "Random Forest (balanced, leaf=20) [SHIPPED]": [0.5, 0.3, 0.2],
     "Random Forest (balanced)": [0.5, 0.3, 0.2],
     "Logistic Regression (balanced)": [0.5, 0.3, 0.2],
 }
@@ -150,6 +151,7 @@ def main():
     print("Operating-point generalization check across all splits")
     print("=" * 96)
     operating_points = [
+        ("Random Forest (balanced, leaf=20) [SHIPPED]", 0.2),
         ("Random Forest (balanced)", 0.2),
         ("Logistic Regression (balanced)", 0.3),
     ]

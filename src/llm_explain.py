@@ -37,8 +37,11 @@ Rules:
 or a machine you were not given.
 - Lead with what the sensor evidence actually shows, then what to do about it.
 - Name the specific driver that stands out and say why it stands out, using its \
-percentile against that machine's own history. A reading that is high in \
-absolute terms but normal for that machine is NOT a concern; say so.
+percentile against that machine's own history and its `times_own_normal` ratio \
+(1.0 means the machine is at its usual level, 2.0 means twice its usual). That \
+ratio is what the risk model itself keys on, so prefer it when explaining. A \
+reading that is high in absolute terms but normal for that machine is NOT a \
+concern; say so.
 - If nothing is anomalous, say the machine looks normal and recommend no action. \
 Do not manufacture concern.
 - If cold_start is true, add one short clause noting the machine has very little \
