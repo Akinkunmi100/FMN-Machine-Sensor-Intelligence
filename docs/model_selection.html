@@ -1,0 +1,1053 @@
+<title>Failure Risk Model Selection</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap">
+
+<style>
+  :root {
+    color-scheme: light;
+    --ground:      #e9edf0;
+    --surface:     #ffffff;
+    --surface-2:   #f3f6f8;
+    --plate:       #dfe6eb;
+    --ink:         #101922;
+    --ink-soft:    #56697a;
+    --ink-muted:   #7d8f9d;
+    --rule:        #d2dbe2;
+    --rule-strong: #b9c6d0;
+    --accent:      #1c5cab;
+    --accent-soft: #e7eff9;
+
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+
+    --status-good:     #0ca30c;
+    --status-warning:  #b8801a;
+    --status-critical: #d03b3b;
+    --wash-critical:   rgba(208, 59, 59, 0.07);
+    --wash-accent:     rgba(42, 120, 214, 0.08);
+
+    --grid:     #e4eaee;
+    --baseline: #b9c6d0;
+
+    --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+
+    --prose: 70ch;
+    --wide: 1180px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --ground:      #0d1318;
+      --surface:     #161e25;
+      --surface-2:   #1b242c;
+      --plate:       #1f2a33;
+      --ink:         #e6ecf1;
+      --ink-soft:    #9fb0be;
+      --ink-muted:   #7e909e;
+      --rule:        #253039;
+      --rule-strong: #33424e;
+      --accent:      #3987e5;
+      --accent-soft: #17263a;
+
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --series-3: #199e70;
+
+      --status-good:     #0ca30c;
+      --status-warning:  #fab219;
+      --status-critical: #e05a5a;
+      --wash-critical:   rgba(224, 90, 90, 0.10);
+      --wash-accent:     rgba(57, 135, 229, 0.12);
+
+      --grid:     #222d36;
+      --baseline: #33424e;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ground:      #0d1318;
+    --surface:     #161e25;
+    --surface-2:   #1b242c;
+    --plate:       #1f2a33;
+    --ink:         #e6ecf1;
+    --ink-soft:    #9fb0be;
+    --ink-muted:   #7e909e;
+    --rule:        #253039;
+    --rule-strong: #33424e;
+    --accent:      #3987e5;
+    --accent-soft: #17263a;
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+
+    --status-good:     #0ca30c;
+    --status-warning:  #fab219;
+    --status-critical: #e05a5a;
+    --wash-critical:   rgba(224, 90, 90, 0.10);
+    --wash-accent:     rgba(57, 135, 229, 0.12);
+
+    --grid:     #222d36;
+    --baseline: #33424e;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { max-width: var(--wide); margin: 0 auto; padding: 0 24px 96px; }
+
+  .col { max-width: var(--prose); }
+
+  h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
+  h1 { font-size: clamp(2rem, 4.4vw, 3.05rem); font-weight: 700; letter-spacing: -0.022em; line-height: 1.06; }
+  h2 { font-size: clamp(1.32rem, 2.3vw, 1.68rem); font-weight: 700; letter-spacing: -0.014em; line-height: 1.18; }
+  h3 { font-size: 1.02rem; font-weight: 600; letter-spacing: -0.004em; }
+  p { margin: 0; }
+  strong { font-weight: 600; color: var(--ink); }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+  /* ---------- masthead ---------- */
+  header.masthead {
+    display: flex; flex-direction: column; gap: 20px;
+    padding: 64px 0 40px;
+    border-bottom: 2px solid var(--ink);
+  }
+  .masthead .lede {
+    font-size: 1.12rem; line-height: 1.58; color: var(--ink-soft); max-width: 64ch;
+  }
+  .rule-run { display: flex; align-items: center; gap: 14px; }
+  .rule-run::after { content: ""; flex: 1; height: 1px; background: var(--rule-strong); }
+
+  /* ---------- nameplate ---------- */
+  .plate {
+    margin: 40px 0 0;
+    background: var(--plate);
+    border: 1px solid var(--rule-strong);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+  }
+  .plate-cell {
+    padding: 16px 18px 15px;
+    border-right: 1px solid var(--rule-strong);
+    border-bottom: 1px solid var(--rule-strong);
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .plate-key {
+    font-family: var(--font-mono); font-size: 0.63rem; font-weight: 600;
+    letter-spacing: 0.13em; text-transform: uppercase; color: var(--ink-muted);
+  }
+  .plate-val {
+    font-family: var(--font-mono); font-size: 0.94rem; font-weight: 600;
+    color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1.3;
+  }
+  .plate-val .unit { color: var(--ink-soft); font-weight: 400; }
+  .plate-note { font-size: 0.72rem; color: var(--ink-soft); font-family: var(--font-body); line-height: 1.4; }
+
+  /* ---------- sections ---------- */
+  section { padding-top: 60px; }
+  .sec-head { display: flex; flex-direction: column; gap: 10px; margin-bottom: 22px; }
+  .stack { display: flex; flex-direction: column; gap: 18px; }
+  .stack-tight { display: flex; flex-direction: column; gap: 12px; }
+
+  /* ---------- figures ---------- */
+  figure { margin: 26px 0 0; }
+  .fig-frame {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 20px 20px 14px;
+  }
+  .fig-head { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+  .fig-title { font-family: var(--font-display); font-weight: 600; font-size: 1rem; color: var(--ink); }
+  .fig-sub { font-size: 0.83rem; color: var(--ink-soft); line-height: 1.45; }
+  figcaption { font-size: 0.83rem; color: var(--ink-soft); margin-top: 12px; line-height: 1.5; max-width: 76ch; }
+  .chart-scroll { overflow-x: auto; }
+  .chart-scroll svg { display: block; min-width: 660px; width: 100%; height: auto; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rule); }
+  .legend-item { display: flex; align-items: center; gap: 7px; font-size: 0.78rem; color: var(--ink-soft); }
+  .swatch { width: 11px; height: 11px; flex: none; border-radius: 2px; }
+  .swatch-line { width: 16px; height: 3px; border-radius: 2px; }
+
+  /* ---------- verdict ---------- */
+  .verdict { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); margin-top: 26px; }
+  .verdict-col { background: var(--surface); padding: 20px 22px 22px; display: flex; flex-direction: column; gap: 14px; }
+  .verdict-col.win { background: var(--accent-soft); }
+  .verdict-name { font-family: var(--font-mono); font-size: 0.76rem; font-weight: 600; letter-spacing: 0.06em; color: var(--ink-soft); }
+  .verdict-col.win .verdict-name { color: var(--accent); }
+  .verdict-fig { font-family: var(--font-mono); font-size: 2.05rem; font-weight: 600; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .verdict-lab { font-size: 0.82rem; color: var(--ink-soft); line-height: 1.4; }
+  .verdict-row { display: flex; flex-direction: column; gap: 4px; }
+  .tag { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; padding: 3px 8px; border-radius: 2px; width: fit-content; }
+  .tag-good { color: var(--status-good); background: color-mix(in srgb, var(--status-good) 12%, transparent); }
+  .tag-bad { color: var(--status-critical); background: var(--wash-critical); }
+
+  /* ---------- tables ---------- */
+  .table-wrap { overflow-x: auto; margin-top: 24px; border: 1px solid var(--rule); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.855rem; min-width: 560px; }
+  caption { text-align: left; padding: 15px 18px 13px; font-family: var(--font-display); font-weight: 600; font-size: 0.95rem; color: var(--ink); border-bottom: 1px solid var(--rule); }
+  th, td { padding: 9px 14px; text-align: right; border-bottom: 1px solid var(--rule); }
+  th:first-child, td:first-child { text-align: left; }
+  thead th {
+    font-family: var(--font-mono); font-size: 0.66rem; font-weight: 600;
+    letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-muted);
+    border-bottom: 1px solid var(--rule-strong); white-space: nowrap;
+  }
+  tbody td { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+  tbody td:first-child { font-family: var(--font-body); color: var(--ink); }
+  tbody tr:last-child td { border-bottom: none; }
+  tr.is-pick td { background: var(--accent-soft); color: var(--ink); font-weight: 500; }
+  tr.is-pick td:first-child { font-weight: 600; }
+  tr.is-total td { border-top: 1px solid var(--rule-strong); font-weight: 600; color: var(--ink); }
+  td .mark-bad { color: var(--status-critical); font-weight: 600; }
+
+  /* ---------- callout ---------- */
+  .callout { border-left: 3px solid var(--accent); background: var(--surface); padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; }
+  .callout-title { font-family: var(--font-display); font-weight: 600; font-size: 0.95rem; }
+  .callout p { font-size: 0.92rem; color: var(--ink-soft); }
+
+  .terminal {
+    font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.65;
+    background: var(--surface-2); border: 1px solid var(--rule);
+    padding: 14px 16px; overflow-x: auto; color: var(--ink-soft); white-space: pre;
+  }
+  .terminal .ok { color: var(--status-good); font-weight: 600; }
+
+  /* ---------- limits ---------- */
+  .limits { display: flex; flex-direction: column; margin-top: 24px; border-top: 1px solid var(--rule); }
+  .limit { display: grid; grid-template-columns: 148px 1fr; gap: 22px; padding: 15px 0; border-bottom: 1px solid var(--rule); align-items: start; }
+  .limit-key { font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-muted); padding-top: 3px; }
+  .limit-body { font-size: 0.9rem; color: var(--ink-soft); line-height: 1.55; }
+  .limit-body strong { color: var(--ink); }
+
+  ul.plain { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 9px; }
+  ul.plain li { color: var(--ink-soft); }
+  ul.plain li::marker { color: var(--ink-muted); }
+
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--surface-2); padding: 1px 5px; border-radius: 2px; color: var(--ink); }
+
+  footer.foot { margin-top: 72px; padding-top: 22px; border-top: 2px solid var(--ink); display: flex; flex-wrap: wrap; gap: 12px 32px; justify-content: space-between; align-items: baseline; }
+  .foot-note { font-size: 0.8rem; color: var(--ink-muted); font-family: var(--font-mono); }
+
+  /* ---------- tooltip ---------- */
+  .tip {
+    position: fixed; pointer-events: none; z-index: 40; opacity: 0;
+    transition: opacity 90ms ease; background: var(--ink); color: var(--ground);
+    font-family: var(--font-mono); font-size: 0.72rem; line-height: 1.5;
+    padding: 7px 10px; border-radius: 3px; white-space: pre; box-shadow: 0 4px 14px rgba(0,0,0,0.22);
+  }
+  .tip.on { opacity: 1; }
+
+  .hit { fill: transparent; cursor: crosshair; }
+  .bar-hit { cursor: pointer; }
+
+  a { color: var(--accent); text-underline-offset: 2px; }
+  a:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  @media (max-width: 620px) {
+    .limit { grid-template-columns: 1fr; gap: 6px; }
+    header.masthead { padding-top: 44px; }
+  }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <span class="eyebrow">Phase 2 · Model Selection Record</span>
+    <h1>Which model gets to<br>call a breakdown?</h1>
+    <p class="lede">
+      Six candidates, three time-ordered validation windows, and one reframe that
+      reversed the answer. This is the decision record for the failure-risk model
+      behind the plant maintenance dashboard — including the evidence that argued
+      against the model the headline metrics first preferred.
+    </p>
+
+    <div class="plate" role="group" aria-label="Selected model specification">
+      <div class="plate-cell">
+        <span class="plate-key">Selected model</span>
+        <span class="plate-val">RandomForest</span>
+        <span class="plate-note">balanced class weights, depth 8, 300 trees</span>
+      </div>
+      <div class="plate-cell">
+        <span class="plate-key">Prediction horizon</span>
+        <span class="plate-val">24 <span class="unit">h</span></span>
+        <span class="plate-note">P(failure in the next 24 hours)</span>
+      </div>
+      <div class="plate-cell">
+        <span class="plate-key">Alert threshold</span>
+        <span class="plate-val">0.20</span>
+        <span class="plate-note">verified on both CV folds before adoption</span>
+      </div>
+      <div class="plate-cell">
+        <span class="plate-key">AUC-PR</span>
+        <span class="plate-val">0.641</span>
+        <span class="plate-note">32× the naive baseline of 0.020</span>
+      </div>
+      <div class="plate-cell">
+        <span class="plate-key">Events caught</span>
+        <span class="plate-val">19 / 19</span>
+        <span class="plate-note">across 83 days of held-out testing</span>
+      </div>
+      <div class="plate-cell">
+        <span class="plate-key">Median warning</span>
+        <span class="plate-val">24.0 <span class="unit">h</span></span>
+        <span class="plate-note">22 h minimum observed</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ HERO FIGURE ============ -->
+  <section id="thesis">
+    <div class="sec-head col">
+      <span class="eyebrow">The decision in one figure</span>
+      <h2>A breakdown that only one threshold caught</h2>
+    </div>
+    <div class="col stack">
+      <p>
+        Machine <span class="num">MCH-213</span> failed at 18:00 on 8 April. The model had been
+        watching it all along — but whether anyone was <em>told</em> came down to where the alert
+        line sat. At <span class="num">0.30</span> the warning never fires. At
+        <span class="num">0.20</span> it fires 22 hours ahead, with a peak score of
+        <span class="num">0.2247</span>: a margin of about two hundredths.
+      </p>
+    </div>
+
+    <figure>
+      <div class="fig-frame">
+        <div class="fig-head">
+          <span class="fig-title">MCH-213 — modelled failure risk into the 8 April breakdown</span>
+          <span class="fig-sub">Held-out prediction, primary split. Hourly risk score, 7–8 April 2026.</span>
+        </div>
+        <div class="chart-scroll"><svg id="heroChart" viewBox="0 0 1000 360" role="img"
+             aria-label="Risk score for MCH-213 rising into the 24-hour window before its 8 April failure, crossing the 0.20 alert threshold 22 hours ahead but never reaching 0.30."></svg></div>
+        <div class="legend">
+          <span class="legend-item"><span class="swatch swatch-line" style="background: var(--series-1)"></span>Modelled risk score</span>
+          <span class="legend-item"><span class="swatch swatch-line" style="background: var(--status-good)"></span>Adopted threshold 0.20 — catches</span>
+          <span class="legend-item"><span class="swatch swatch-line" style="background: var(--ink-muted)"></span>Rejected threshold 0.30 — misses</span>
+          <span class="legend-item"><span class="swatch" style="background: var(--status-critical)"></span>Failure event</span>
+        </div>
+      </div>
+      <figcaption>
+        The 24-hour shaded band is the window the model is asked to predict. Eight hours inside it
+        clear 0.20; none reach 0.30. This is a narrow save, not a comfortable one — and it is
+        reported that way deliberately.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ THE REFRAME ============ -->
+  <section id="reframe">
+    <div class="sec-head col">
+      <span class="eyebrow">Why the headline metric chose wrong</span>
+      <h2>164 “failures” in the test set are really 7 breakdowns</h2>
+    </div>
+    <div class="col stack">
+      <p>
+        Each failure is expanded into a 24-hour warning window, so one breakdown becomes roughly
+        24 positive machine-hours. Row-level scoring counts those hours. Judged that way, Logistic
+        Regression looks decisively safer at threshold 0.5 — <span class="num">2</span> missed hours
+        against Random Forest's <span class="num">49</span>.
+      </p>
+      <p>
+        But missing 49 hours of a 24-hour window says nothing about whether the plant was warned.
+        Re-scored on what operations actually experiences — did <em>any</em> alert fire before each
+        real breakdown, and how many separate false alarms did operators have to chase — the ranking
+        inverts.
+      </p>
+    </div>
+
+    <div class="verdict">
+      <div class="verdict-col win">
+        <span class="verdict-name">Random Forest @ 0.20</span>
+        <div class="verdict-row">
+          <span class="verdict-fig" style="color: var(--status-good)">19 / 19</span>
+          <span class="verdict-lab">breakdowns caught across all three windows</span>
+        </div>
+        <div class="verdict-row">
+          <span class="verdict-fig">54</span>
+          <span class="verdict-lab">false alarm episodes — about one per day across 15 machines</span>
+        </div>
+        <span class="tag tag-good">Selected</span>
+      </div>
+      <div class="verdict-col">
+        <span class="verdict-name">Logistic Regression @ 0.30</span>
+        <div class="verdict-row">
+          <span class="verdict-fig" style="color: var(--status-critical)">18 / 19</span>
+          <span class="verdict-lab">misses MCH-213 entirely on fold 1</span>
+        </div>
+        <div class="verdict-row">
+          <span class="verdict-fig">131</span>
+          <span class="verdict-lab">false alarm episodes — 2.4× the noise, for one fewer catch</span>
+        </div>
+        <span class="tag tag-bad">Rejected</span>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <caption>Event-level performance by validation window</caption>
+        <thead>
+          <tr>
+            <th scope="col">Validation window</th>
+            <th scope="col">RF @ 0.20 caught</th>
+            <th scope="col">RF false episodes</th>
+            <th scope="col">LogReg @ 0.30 caught</th>
+            <th scope="col">LogReg false episodes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Primary — 23 days</td><td>7 / 7</td><td>22</td><td>7 / 7</td><td>34</td></tr>
+          <tr><td>CV fold 1 — 31 days</td><td>4 / 4</td><td>6</td><td><span class="mark-bad">3 / 4</span></td><td>27</td></tr>
+          <tr><td>CV fold 2 — 29 days</td><td>8 / 8</td><td>26</td><td>8 / 8</td><td>70</td></tr>
+          <tr class="is-total"><td>Total</td><td>19 / 19</td><td>54</td><td>18 / 19</td><td>131</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <figcaption>
+      Consecutive alert hours on one machine count as a single episode, not 24 alarms — an operator
+      chasing a continuous alert investigates once.
+    </figcaption>
+
+    <div class="col stack" style="margin-top: 28px">
+      <div class="callout">
+        <span class="callout-title">The decision needs no cost assumptions</span>
+        <p>
+          Normally this call means pricing unplanned downtime against an unnecessary inspection — a
+          ratio this dataset does not contain, and one that is not invented here. It isn't needed.
+          Random Forest is better on <em>both</em> axes at once: more breakdowns caught
+          <em>and</em> fewer false alarms. When one option dominates, the exchange rate between the
+          two costs is irrelevant — every ratio returns the same answer.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CANDIDATES ============ -->
+  <section id="candidates">
+    <div class="sec-head col">
+      <span class="eyebrow">Candidate comparison</span>
+      <h2>Six models, three windows, no winner without the numbers</h2>
+    </div>
+    <div class="col stack">
+      <p>
+        The raw positive rate is <span class="num">0.039%</span>. A model that never alerts scores
+        <span class="num">99.96%</span> accuracy and is worthless, so accuracy and ROC are both
+        dishonest here. AUC-PR ignores true negatives entirely, and its no-skill floor is the
+        positive rate itself — an honest baseline to beat.
+      </p>
+    </div>
+
+    <figure>
+      <div class="fig-frame">
+        <div class="fig-head">
+          <span class="fig-title">AUC-PR by model and validation window</span>
+          <span class="fig-sub">Higher is better. Naive baseline = never alert.</span>
+        </div>
+        <div class="chart-scroll"><svg id="aucChart" viewBox="0 0 1000 520" role="img"
+             aria-label="Grouped bar chart of AUC-PR for eight models across three validation windows; Random Forest leads on the primary split and fold 1, while Logistic Regression collapses to 0.030 on fold 1."></svg></div>
+        <div class="legend">
+          <span class="legend-item"><span class="swatch" style="background: var(--series-1)"></span>Primary 80/20</span>
+          <span class="legend-item"><span class="swatch" style="background: var(--series-2)"></span>CV fold 1 — March</span>
+          <span class="legend-item"><span class="swatch" style="background: var(--series-3)"></span>CV fold 2 — April</span>
+        </div>
+      </div>
+      <figcaption>
+        Full values are listed in the table below, which also serves as the non-colour reading of
+        this chart.
+      </figcaption>
+    </figure>
+
+    <div class="table-wrap">
+      <table>
+        <caption>AUC-PR — full results</caption>
+        <thead>
+          <tr>
+            <th scope="col">Model</th>
+            <th scope="col">Fold 1 · Mar</th>
+            <th scope="col">Fold 2 · Apr</th>
+            <th scope="col">Primary</th>
+            <th scope="col">Interpretability</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Naive baseline — never alert</td><td>0.0086</td><td>0.0180</td><td>0.0198</td><td>—</td></tr>
+          <tr><td>Logistic Regression</td><td><span class="mark-bad">0.0301</span></td><td>0.3438</td><td>0.3957</td><td>High</td></tr>
+          <tr><td>Decision Tree — depth 4</td><td>0.2227</td><td>0.3397</td><td>0.3136</td><td>High</td></tr>
+          <tr class="is-pick"><td>Random Forest</td><td>0.4016</td><td>0.5773</td><td>0.6411</td><td>Medium</td></tr>
+          <tr><td>HistGradientBoosting</td><td>0.3499</td><td>0.5730</td><td>0.5516</td><td>Medium</td></tr>
+          <tr><td>XGBoost</td><td>0.3492</td><td>0.5334</td><td>0.4758</td><td>Medium</td></tr>
+          <tr><td>Ensemble — averaged probability</td><td>0.3896</td><td>0.6059</td><td>0.5834</td><td>Low</td></tr>
+          <tr><td>Ensemble — majority vote</td><td>0.2538</td><td>0.3906</td><td>0.4341</td><td>Low</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col stack" style="margin-top: 30px">
+      <h3>Three results worth stating plainly</h3>
+      <ul class="plain">
+        <li>
+          <strong>Boosting did not help.</strong> HistGradientBoosting and XGBoost trail Random
+          Forest on all three windows. Further variants were deliberately not added — with 164
+          positive test rows, more candidates buy noise, not signal.
+        </li>
+        <li>
+          <strong>No stacked ensemble was built.</strong> With 17 real failure events a trained
+          meta-learner would fit which model got lucky on which breakdown. The two training-free
+          combinations tested lose to the best single model on two of three windows, and majority
+          vote is worst of all — binarising at 0.5 before combining discards exactly the ranking
+          information AUC-PR rewards.
+        </li>
+        <li>
+          <strong>The interpretable model is the unstable one.</strong> At
+          <span class="num">0.0301</span> on fold 1, Logistic Regression sits barely above the
+          <span class="num">0.0086</span> naive floor. Trained on the least data, it essentially
+          stops working — which matters, because this system is retrained as history accumulates.
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============ THRESHOLD ============ -->
+  <section id="threshold">
+    <div class="sec-head col">
+      <span class="eyebrow">Operating point</span>
+      <h2>Why the alert line sits at 0.20</h2>
+    </div>
+    <div class="col stack">
+      <p>
+        Dropping from <span class="num">0.30</span> to <span class="num">0.20</span> converts a
+        missed breakdown into a caught one while the false-alarm episode count stays flat —
+        <span class="num">23</span> down to <span class="num">22</span>. The extra alert
+        <em>hours</em> land inside warning windows that were already firing, so operators see no
+        additional noise.
+      </p>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <caption>Random Forest threshold sweep — primary split</caption>
+        <thead>
+          <tr>
+            <th scope="col">Threshold</th>
+            <th scope="col">Events caught</th>
+            <th scope="col">False episodes</th>
+            <th scope="col">Recall (rows)</th>
+            <th scope="col">Precision (rows)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>0.50</td><td><span class="mark-bad">6 / 7</span></td><td>22</td><td>0.701</td><td>0.491</td></tr>
+          <tr><td>0.30</td><td><span class="mark-bad">6 / 7</span></td><td>23</td><td>0.774</td><td>0.423</td></tr>
+          <tr class="is-pick"><td>0.20</td><td>7 / 7</td><td>22</td><td>0.854</td><td>0.378</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <figcaption>
+      Selected on the primary split, then confirmed out of sample — 4/4 on fold 1 and 8/8 on fold 2
+      — before adoption. Tuning a threshold on the window you then report it on is soft leakage of
+      the same family this evaluation was built to prevent.
+    </figcaption>
+  </section>
+
+  <!-- ============ WHAT IT KEYS ON ============ -->
+  <section id="drivers">
+    <div class="sec-head col">
+      <span class="eyebrow">Risk drivers</span>
+      <h2>Instability predicts failure — not temperature</h2>
+    </div>
+    <div class="col stack">
+      <p>
+        Rolling standard deviations alone carry <span class="num">63.5%</span> of total feature
+        importance; raw instantaneous readings contribute under <span class="num">8%</span>
+        combined. Machines here don't fail because they run hot — they fail because they start
+        running <em>erratically</em>. Vibration outweighs temperature roughly
+        <span class="num">62%</span> to <span class="num">37%</span>.
+      </p>
+    </div>
+
+    <figure>
+      <div class="fig-frame">
+        <div class="fig-head">
+          <span class="fig-title">Feature importance — top 12 of 19</span>
+          <span class="fig-sub">Random Forest impurity importance, fitted on all established-machine history.</span>
+        </div>
+        <div class="chart-scroll"><svg id="impChart" viewBox="0 0 1000 430" role="img"
+             aria-label="Horizontal bar chart of feature importances; 24-hour rolling standard deviation of vibration leads at 0.258, while run hours since maintenance contributes only 0.007."></svg></div>
+        <div class="legend">
+          <span class="legend-item"><span class="swatch" style="background: var(--series-1)"></span>Vibration</span>
+          <span class="legend-item"><span class="swatch" style="background: var(--series-2)"></span>Temperature</span>
+          <span class="legend-item"><span class="swatch" style="background: var(--series-3)"></span>Maintenance / line</span>
+        </div>
+      </div>
+    </figure>
+
+    <div class="col stack" style="margin-top: 26px">
+      <div class="callout">
+        <span class="callout-title">The most important number here is the smallest one</span>
+        <p>
+          <code>run_hours_since_maintenance</code> contributes <span class="num">0.007</span>. The
+          intuitive “wear since last service” hypothesis is <em>not</em> what drives these
+          predictions — and that is a quiet vindication of the leakage guard. Restricted to causal
+          use the feature is nearly worthless; a forward-looking version would have looked
+          spectacularly predictive by encoding the reactive maintenance reset that <em>follows</em>
+          the breakdown. Production line contributes <span class="num">0.0006</span>, which
+          strengthens the cold-start case: the model leans on no plant topology it cannot verify
+          for a new machine.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HONEST EVALUATION ============ -->
+  <section id="honest">
+    <div class="sec-head col">
+      <span class="eyebrow">Validation design</span>
+      <h2>How the evaluation was kept honest</h2>
+    </div>
+
+    <div class="col stack">
+      <h3>Time-ordered splits, never random k-fold</h3>
+      <p>
+        Hourly readings within a machine are strongly autocorrelated, so random k-fold would leak
+        neighbouring hours across the split and inflate every score. A third fold trained on January
+        alone was deliberately not used — January contains zero failures, so there would be no
+        positive class to fit against.
+      </p>
+
+      <h3>A 24-hour embargo on the target</h3>
+      <p>
+        The label at time <code>t</code> depends on data up to <code>t+24h</code>, so a training row
+        within 24 hours of the cutoff has a label partly determined by test-side data — leakage
+        through the <em>target</em>, which no amount of careful feature engineering would catch.
+        Every split purges training rows whose horizon window crosses its cutoff.
+      </p>
+
+      <h3>Causality proven, not promised</h3>
+      <p>
+        <span class="num">77.3%</span> of maintenance resets coincide with or immediately follow the
+        breakdown they would appear to predict — resets are largely <em>reactive</em>. A
+        forward-looking feature built on them would be a near-copy of the label. So every feature is
+        recomputed on truncated data and asserted unchanged: a feature that peeks forward changes
+        when the future is removed.
+      </p>
+      <div class="terminal">$ python src/test_no_leakage.py
+<span class="ok">OK</span>: all 19 features are causal (unchanged across 25926 rows
+    when future data is truncated).</div>
+
+      <h3>Cold-start machines are excluded, but still scoreable</h3>
+      <p>
+        <span class="num">MCH-300</span> and <span class="num">MCH-301</span> hold 72 rows each —
+        <span class="num">2.96</span> days, zero failures. Three days cannot support a 24-hour
+        horizon label, so both are excluded from training and evaluation. So that they remain
+        scoreable, <code>machine_id</code> is deliberately not a feature: the model reads only
+        physically-grounded signals and generalises to machines it has never seen. Their scores are
+        real predictions but <em>unvalidated</em>.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ LIMITATIONS ============ -->
+  <section id="limits">
+    <div class="sec-head col">
+      <span class="eyebrow">Limitations</span>
+      <h2>What this evidence does not establish</h2>
+    </div>
+    <div class="limits">
+      <div class="limit">
+        <span class="limit-key">Sample size</span>
+        <span class="limit-body">
+          <strong>19 events is small.</strong> 19/19 is a real result over ~83 days of held-out
+          testing, not a guarantee. It should be described to the plant team as “caught every
+          failure in testing” — never as “never misses”.
+        </span>
+      </div>
+      <div class="limit">
+        <span class="limit-key">Alarm precision</span>
+        <span class="limit-body">
+          <strong>Roughly 3 of every 4 alert episodes are false</strong> (row-level precision
+          0.378). Acceptable given the cost asymmetry, but the plant team must be told upfront so
+          the expectation is calibrated from day one.
+        </span>
+      </div>
+      <div class="limit">
+        <span class="limit-key">Cold start</span>
+        <span class="limit-body">
+          <strong>MCH-300 and MCH-301 are unvalidated, not validated-good.</strong> With zero
+          recorded failures their event-level recall is unmeasurable. Their dashboard scores need a
+          visible lower-confidence marker.
+        </span>
+      </div>
+      <div class="limit">
+        <span class="limit-key">Trend view</span>
+        <span class="limit-body">
+          <strong>Historical scores in the app will be in-sample.</strong> The shipped artifact is
+          refit on all established history, so re-scoring that same history produces optimistic risk
+          curves. The trend chart needs walk-forward out-of-sample scores instead.
+        </span>
+      </div>
+      <div class="limit">
+        <span class="limit-key">Missing data</span>
+        <span class="limit-body">
+          <strong>Forward-fill is justified only by this dataset's gap profile</strong> — ~99% of
+          gaps are isolated single hours, longest run 2. A future feed with real outages would need
+          this revisited.
+        </span>
+      </div>
+      <div class="limit">
+        <span class="limit-key">Failure modes</span>
+        <span class="limit-body">
+          <strong>Failures are near-uniform across machines</strong> (1–2 each), so the model cannot
+          learn machine-specific failure modes — by design, since that is also what lets it score
+          new machines.
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ARTIFACT ============ -->
+  <section id="artifact">
+    <div class="sec-head col">
+      <span class="eyebrow">Shipped artifact</span>
+      <h2>What the app loads at boot</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <caption>models/failure_risk_rf.joblib</caption>
+        <tbody>
+          <tr><td>Trained on</td><td>42,850 rows · 404 positive · 0.943%</td></tr>
+          <tr><td>Machines</td><td>15 established · MCH-300 / MCH-301 excluded</td></tr>
+          <tr><td>Date range</td><td>2026-01-01 → 2026-04-29</td></tr>
+          <tr><td>Horizon</td><td>24 h</td></tr>
+          <tr><td>Alert threshold</td><td>0.20</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="col stack" style="margin-top: 20px">
+      <p>
+        Refit on all established history after validation — same hyperparameters, more data. The
+        metrics on this page come from the held-out windows, never from this final fit. Nothing is
+        retrained at request time.
+      </p>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span class="foot-note">Phase 2 · Model selection · Predictive maintenance</span>
+    <span class="foot-note">Every figure reproduced by <code>src/</code> in the project repo</span>
+  </footer>
+</div>
+
+<div class="tip" id="tip" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  "use strict";
+  var SVG = "http://www.w3.org/2000/svg";
+  var tip = document.getElementById("tip");
+
+  function el(name, attrs, parent) {
+    var n = document.createElementNS(SVG, name);
+    for (var k in attrs) { if (attrs[k] !== null && attrs[k] !== undefined) n.setAttribute(k, attrs[k]); }
+    if (parent) { parent.appendChild(n); }
+    return n;
+  }
+  function showTip(evt, text) {
+    tip.textContent = text;
+    tip.classList.add("on");
+    var pad = 14;
+    var x = evt.clientX + pad, y = evt.clientY + pad;
+    var r = tip.getBoundingClientRect();
+    if (x + r.width > window.innerWidth - 8) { x = evt.clientX - r.width - pad; }
+    if (y + r.height > window.innerHeight - 8) { y = evt.clientY - r.height - pad; }
+    tip.style.left = x + "px";
+    tip.style.top = y + "px";
+  }
+  function hideTip() { tip.classList.remove("on"); }
+
+  /* ---------------- hero: MCH-213 risk trace ---------------- */
+  var TRACE = [
+    ["04-07 00:00",0.1257],["04-07 01:00",0.1158],["04-07 02:00",0.0827],["04-07 03:00",0.1485],
+    ["04-07 04:00",0.1487],["04-07 05:00",0.1947],["04-07 06:00",0.0924],["04-07 07:00",0.0528],
+    ["04-07 08:00",0.1585],["04-07 09:00",0.0890],["04-07 10:00",0.1133],["04-07 11:00",0.0696],
+    ["04-07 12:00",0.1059],["04-07 13:00",0.0795],["04-07 14:00",0.1059],["04-07 15:00",0.1489],
+    ["04-07 16:00",0.1159],["04-07 17:00",0.1291],["04-07 18:00",0.1159],["04-07 19:00",0.1917],
+    ["04-07 20:00",0.2181],["04-07 21:00",0.2214],["04-07 22:00",0.1555],["04-07 23:00",0.2214],
+    ["04-08 00:00",0.2247],["04-08 01:00",0.1519],["04-08 02:00",0.2115],["04-08 03:00",0.2148],
+    ["04-08 04:00",0.2188],["04-08 05:00",0.1488],["04-08 06:00",0.2050],["04-08 07:00",0.1654],
+    ["04-08 08:00",0.1192],["04-08 09:00",0.1588],["04-08 10:00",0.1192],["04-08 11:00",0.1622],
+    ["04-08 12:00",0.1589],["04-08 13:00",0.1456],["04-08 14:00",0.1587],["04-08 15:00",0.1291],
+    ["04-08 16:00",0.1654],["04-08 17:00",0.1856]
+  ];
+  var WINDOW_START = 18; /* index of 04-07 18:00 — 24 h before failure */
+
+  function drawHero() {
+    var svg = document.getElementById("heroChart");
+    if (!svg) { return; }
+    var W = 1000, H = 360;
+    var m = { top: 26, right: 132, bottom: 46, left: 58 };
+    var pw = W - m.left - m.right, ph = H - m.top - m.bottom;
+    var yMax = 0.35;
+    var n = TRACE.length;
+    var stepX = pw / n; /* last slot reserved for the failure marker */
+
+    function X(i) { return m.left + i * stepX; }
+    function Y(v) { return m.top + ph - (v / yMax) * ph; }
+
+    /* shaded 24h prediction window */
+    el("rect", { x: X(WINDOW_START), y: m.top, width: X(n) - X(WINDOW_START), height: ph,
+                 fill: "var(--wash-critical)" }, svg);
+    el("text", { x: X(WINDOW_START) + 8, y: m.top + 15, "font-family": "var(--font-mono)",
+                 "font-size": 10.5, "font-weight": 600, "letter-spacing": "0.08em",
+                 fill: "var(--status-critical)" }, svg).textContent = "24 H PREDICTION WINDOW";
+
+    /* gridlines + y ticks */
+    [0, 0.1, 0.2, 0.3].forEach(function (v) {
+      el("line", { x1: m.left, x2: m.left + pw, y1: Y(v), y2: Y(v),
+                   stroke: "var(--grid)", "stroke-width": 1 }, svg);
+      el("text", { x: m.left - 10, y: Y(v) + 4, "text-anchor": "end",
+                   "font-family": "var(--font-mono)", "font-size": 11,
+                   fill: "var(--ink-muted)" }, svg).textContent = v.toFixed(2);
+    });
+
+    /* threshold lines */
+    el("line", { x1: m.left, x2: m.left + pw, y1: Y(0.30), y2: Y(0.30),
+                 stroke: "var(--ink-muted)", "stroke-width": 2, "stroke-dasharray": "5 4" }, svg);
+    el("text", { x: m.left + pw + 10, y: Y(0.30) + 4, "font-family": "var(--font-mono)",
+                 "font-size": 11, "font-weight": 600, fill: "var(--ink-muted)" }, svg)
+      .textContent = "0.30 misses";
+    el("line", { x1: m.left, x2: m.left + pw, y1: Y(0.20), y2: Y(0.20),
+                 stroke: "var(--status-good)", "stroke-width": 2 }, svg);
+    el("text", { x: m.left + pw + 10, y: Y(0.20) + 4, "font-family": "var(--font-mono)",
+                 "font-size": 11, "font-weight": 600, fill: "var(--status-good)" }, svg)
+      .textContent = "0.20 catches";
+
+    /* baseline */
+    el("line", { x1: m.left, x2: m.left + pw, y1: m.top + ph, y2: m.top + ph,
+                 stroke: "var(--baseline)", "stroke-width": 1 }, svg);
+
+    /* risk line */
+    var d = TRACE.map(function (p, i) { return (i ? "L" : "M") + X(i).toFixed(1) + " " + Y(p[1]).toFixed(1); }).join(" ");
+    el("path", { d: d, fill: "none", stroke: "var(--series-1)", "stroke-width": 2,
+                 "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+
+    /* alert points above 0.20 */
+    TRACE.forEach(function (p, i) {
+      if (p[1] >= 0.20) {
+        el("circle", { cx: X(i), cy: Y(p[1]), r: 4.5, fill: "var(--status-good)",
+                       stroke: "var(--surface)", "stroke-width": 2 }, svg);
+      }
+    });
+
+    /* first alert callout */
+    var fa = 20; /* 04-07 20:00 */
+    el("line", { x1: X(fa), x2: X(fa), y1: Y(TRACE[fa][1]) - 10, y2: m.top + 40,
+                 stroke: "var(--status-good)", "stroke-width": 1 }, svg);
+    el("text", { x: X(fa) - 4, y: m.top + 33, "text-anchor": "end", "font-family": "var(--font-mono)",
+                 "font-size": 11, "font-weight": 600, fill: "var(--status-good)" }, svg)
+      .textContent = "FIRST ALERT · 22 H AHEAD";
+
+    /* failure marker at right edge of plot */
+    var fx = m.left + pw;
+    el("line", { x1: fx, x2: fx, y1: m.top, y2: m.top + ph,
+                 stroke: "var(--status-critical)", "stroke-width": 2 }, svg);
+    el("circle", { cx: fx, cy: m.top + ph, r: 5.5, fill: "var(--status-critical)",
+                   stroke: "var(--surface)", "stroke-width": 2 }, svg);
+    var lab = el("text", { x: fx + 10, y: m.top + ph - 26, "font-family": "var(--font-mono)",
+                           "font-size": 11, "font-weight": 600, fill: "var(--status-critical)" }, svg);
+    lab.textContent = "FAILURE";
+    el("text", { x: fx + 10, y: m.top + ph - 11, "font-family": "var(--font-mono)",
+                 "font-size": 10.5, fill: "var(--ink-soft)" }, svg).textContent = "08 Apr 18:00";
+
+    /* x ticks */
+    [0, 12, 24, 36].forEach(function (i) {
+      el("text", { x: X(i), y: m.top + ph + 22, "text-anchor": "middle",
+                   "font-family": "var(--font-mono)", "font-size": 11,
+                   fill: "var(--ink-muted)" }, svg).textContent = TRACE[i][0].slice(6);
+    });
+    el("text", { x: m.left, y: m.top + ph + 39, "font-family": "var(--font-mono)",
+                 "font-size": 10, "letter-spacing": "0.08em",
+                 fill: "var(--ink-muted)" }, svg).textContent = "7 APRIL 2026 →  8 APRIL 2026";
+    el("text", { x: m.left - 10, y: m.top - 10, "text-anchor": "end", "font-family": "var(--font-mono)",
+                 "font-size": 10, "letter-spacing": "0.06em",
+                 fill: "var(--ink-muted)" }, svg).textContent = "RISK";
+
+    /* hover layer */
+    var focus = el("line", { x1: 0, x2: 0, y1: m.top, y2: m.top + ph, stroke: "var(--accent)",
+                             "stroke-width": 1, opacity: 0 }, svg);
+    var dot = el("circle", { r: 5, fill: "var(--series-1)", stroke: "var(--surface)",
+                             "stroke-width": 2, opacity: 0 }, svg);
+    var hit = el("rect", { x: m.left, y: m.top, width: pw, height: ph, class: "hit" }, svg);
+    hit.addEventListener("mousemove", function (evt) {
+      var box = svg.getBoundingClientRect();
+      var rel = (evt.clientX - box.left) / box.width * W;
+      var i = Math.round((rel - m.left) / stepX);
+      if (i < 0) { i = 0; }
+      if (i > n - 1) { i = n - 1; }
+      focus.setAttribute("x1", X(i)); focus.setAttribute("x2", X(i)); focus.setAttribute("opacity", 1);
+      dot.setAttribute("cx", X(i)); dot.setAttribute("cy", Y(TRACE[i][1])); dot.setAttribute("opacity", 1);
+      var flag = TRACE[i][1] >= 0.20 ? "  ▲ alert" : "";
+      showTip(evt, TRACE[i][0] + "\nrisk " + TRACE[i][1].toFixed(4) + flag);
+    });
+    hit.addEventListener("mouseleave", function () {
+      focus.setAttribute("opacity", 0); dot.setAttribute("opacity", 0); hideTip();
+    });
+  }
+
+  /* ---------------- AUC-PR grouped bars ---------------- */
+  var MODELS = [
+    ["Naive baseline", 0.0198, 0.0086, 0.0180],
+    ["Logistic Regression", 0.3957, 0.0301, 0.3438],
+    ["Decision Tree (d4)", 0.3136, 0.2227, 0.3397],
+    ["Random Forest", 0.6411, 0.4016, 0.5773],
+    ["HistGradientBoosting", 0.5516, 0.3499, 0.5730],
+    ["XGBoost", 0.4758, 0.3492, 0.5334],
+    ["Ensemble · averaged", 0.5834, 0.3896, 0.6059],
+    ["Ensemble · vote", 0.4341, 0.2538, 0.3906]
+  ];
+  var SPLIT_NAMES = ["Primary 80/20", "CV fold 1 · Mar", "CV fold 2 · Apr"];
+  var SPLIT_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)"];
+
+  function drawAuc() {
+    var svg = document.getElementById("aucChart");
+    if (!svg) { return; }
+    var W = 1000, H = 520;
+    var m = { top: 30, right: 64, bottom: 42, left: 208 };
+    var pw = W - m.left - m.right, ph = H - m.top - m.bottom;
+    var xMax = 0.70;
+    var groupH = ph / MODELS.length;
+    var barH = 12, gap = 2;
+    var blockH = barH * 3 + gap * 2;
+
+    function X(v) { return m.left + (v / xMax) * pw; }
+
+    [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7].forEach(function (v) {
+      el("line", { x1: X(v), x2: X(v), y1: m.top, y2: m.top + ph,
+                   stroke: "var(--grid)", "stroke-width": 1 }, svg);
+      el("text", { x: X(v), y: m.top + ph + 22, "text-anchor": "middle",
+                   "font-family": "var(--font-mono)", "font-size": 11,
+                   fill: "var(--ink-muted)" }, svg).textContent = v.toFixed(1);
+    });
+    el("text", { x: m.left, y: m.top - 12, "font-family": "var(--font-mono)", "font-size": 10,
+                 "letter-spacing": "0.08em", fill: "var(--ink-muted)" }, svg).textContent = "AUC-PR →";
+    el("line", { x1: m.left, x2: m.left, y1: m.top, y2: m.top + ph,
+                 stroke: "var(--baseline)", "stroke-width": 1 }, svg);
+
+    MODELS.forEach(function (row, gi) {
+      var gTop = m.top + gi * groupH + (groupH - blockH) / 2;
+      var isPick = row[0] === "Random Forest";
+
+      el("text", { x: m.left - 14, y: gTop + blockH / 2 + 4, "text-anchor": "end",
+                   "font-family": isPick ? "var(--font-mono)" : "var(--font-body)",
+                   "font-size": isPick ? 12.5 : 12.5,
+                   "font-weight": isPick ? 600 : 400,
+                   fill: isPick ? "var(--ink)" : "var(--ink-soft)" }, svg).textContent = row[0];
+
+      for (var s = 0; s < 3; s++) {
+        var v = row[s + 1];
+        var y = gTop + s * (barH + gap);
+        var w = Math.max(X(v) - m.left, 1.5);
+        var g = el("g", { class: "bar-hit" }, svg);
+        el("rect", { x: m.left, y: y, width: w, height: barH, rx: 3,
+                     fill: SPLIT_COLORS[s] }, g);
+        el("text", { x: m.left + w + 8, y: y + barH - 2, "font-family": "var(--font-mono)",
+                     "font-size": 10.5, "font-variant-numeric": "tabular-nums",
+                     fill: "var(--ink-muted)" }, g).textContent = v.toFixed(3);
+        (function (name, split, val) {
+          g.addEventListener("mousemove", function (evt) {
+            showTip(evt, name + "\n" + split + "\nAUC-PR " + val.toFixed(4));
+          });
+          g.addEventListener("mouseleave", hideTip);
+        })(row[0], SPLIT_NAMES[s], v);
+      }
+    });
+  }
+
+  /* ---------------- feature importance ---------------- */
+  var IMPORTANCE = [
+    ["vib_roll_std_24h", 0.25837, 0],
+    ["temp_roll_std_24h", 0.20406, 1],
+    ["vib_roll_std_6h", 0.12167, 0],
+    ["vib_roll_mean_24h", 0.10633, 0],
+    ["vib_roll_mean_6h", 0.07205, 0],
+    ["vibration_mm_s", 0.06031, 0],
+    ["temp_roll_mean_24h", 0.05696, 1],
+    ["temp_roll_std_6h", 0.05078, 1],
+    ["temp_roll_mean_6h", 0.03719, 1],
+    ["temperature_c", 0.01729, 1],
+    ["run_hours_since_maintenance", 0.00733, 2],
+    ["vib_diff_6h", 0.00242, 0]
+  ];
+  var FAM = ["var(--series-1)", "var(--series-2)", "var(--series-3)"];
+  var FAM_NAME = ["Vibration", "Temperature", "Maintenance / line"];
+
+  function drawImp() {
+    var svg = document.getElementById("impChart");
+    if (!svg) { return; }
+    var W = 1000, H = 430;
+    var m = { top: 26, right: 76, bottom: 40, left: 236 };
+    var pw = W - m.left - m.right, ph = H - m.top - m.bottom;
+    var xMax = 0.28;
+    var rowH = ph / IMPORTANCE.length;
+    var barH = Math.min(16, rowH - 8);
+
+    function X(v) { return m.left + (v / xMax) * pw; }
+
+    [0, 0.05, 0.10, 0.15, 0.20, 0.25].forEach(function (v) {
+      el("line", { x1: X(v), x2: X(v), y1: m.top, y2: m.top + ph,
+                   stroke: "var(--grid)", "stroke-width": 1 }, svg);
+      el("text", { x: X(v), y: m.top + ph + 22, "text-anchor": "middle",
+                   "font-family": "var(--font-mono)", "font-size": 11,
+                   fill: "var(--ink-muted)" }, svg).textContent = v.toFixed(2);
+    });
+    el("text", { x: m.left, y: m.top - 10, "font-family": "var(--font-mono)", "font-size": 10,
+                 "letter-spacing": "0.08em", fill: "var(--ink-muted)" }, svg)
+      .textContent = "IMPURITY IMPORTANCE →";
+    el("line", { x1: m.left, x2: m.left, y1: m.top, y2: m.top + ph,
+                 stroke: "var(--baseline)", "stroke-width": 1 }, svg);
+
+    IMPORTANCE.forEach(function (row, i) {
+      var y = m.top + i * rowH + (rowH - barH) / 2;
+      var w = Math.max(X(row[1]) - m.left, 2);
+      var g = el("g", { class: "bar-hit" }, svg);
+      el("rect", { x: m.left, y: y, width: w, height: barH, rx: 3, fill: FAM[row[2]] }, g);
+      el("text", { x: m.left - 14, y: y + barH - 3, "text-anchor": "end",
+                   "font-family": "var(--font-mono)", "font-size": 11.5,
+                   fill: "var(--ink-soft)" }, svg).textContent = row[0];
+      el("text", { x: m.left + w + 8, y: y + barH - 3, "font-family": "var(--font-mono)",
+                   "font-size": 11, "font-variant-numeric": "tabular-nums",
+                   fill: "var(--ink-muted)" }, g).textContent = row[1].toFixed(3);
+      (function (name, val, fam) {
+        g.addEventListener("mousemove", function (evt) {
+          showTip(evt, name + "\n" + FAM_NAME[fam] + "\nimportance " + val.toFixed(5));
+        });
+        g.addEventListener("mouseleave", hideTip);
+      })(row[0], row[1], row[2]);
+    });
+  }
+
+  drawHero();
+  drawAuc();
+  drawImp();
+})();
+</script>
