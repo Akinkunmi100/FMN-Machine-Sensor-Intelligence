@@ -29,10 +29,16 @@ CSV_PATH = "project2_manufacturing_sensors.csv"
 MODEL_PATH = Path("models/failure_risk_rf.joblib")
 METADATA_PATH = Path("models/failure_risk_rf.meta.json")
 
-# Provisional bands. HIGH is the validated operating point from Phase 2 (0.20
-# caught 19/19 breakdowns across all held-out windows). The MEDIUM cut is a
-# placeholder for a Phase 4 decision that needs sign-off — see band_report().
-RISK_BANDS = {"high": 0.20, "medium": 0.10}
+# HIGH is the validated operating point from Phase 2: 0.20 caught 19/19
+# breakdowns across every held-out window.
+#
+# MEDIUM ("watch") is 0.02, signed off after seeing the score distribution.
+# The model is bimodal — 92.95% of machine-hours score exactly 0.0000 and the
+# 97th percentile is already 0.1367 — so a middle band is thin wherever it is
+# cut. 0.02 was chosen over a rounder 0.10 because it is the widest useful
+# watch tier (1.14% of hours vs 0.33%), and anything above it already sits in
+# the top 5% of all hours for that fleet.
+RISK_BANDS = {"high": 0.20, "medium": 0.02}
 
 # Features whose percentile-vs-own-history is worth reporting, in importance
 # order from the fitted model (see docs/model_selection.md §9).
