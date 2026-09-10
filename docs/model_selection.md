@@ -287,7 +287,7 @@ machines get *less* signal from them, not more.
 - **19 events is a small sample.** 19/19 is a real result over ~83 days of held-out
   testing, not a guarantee. Describe it to the plant team as "caught every failure in
   testing", never as "never misses".
-- **Roughly 3 of 4 alert episodes are false** (row precision 0.402 at threshold
+- **Roughly 3 of 5 alert episodes are false** (row precision 0.402 at threshold
   0.20). Acceptable given the cost asymmetry, but the plant team must be told upfront
   so the expectation is calibrated from day one.
 - **Minimum lead time fell from 22h to 16h** in this revision — the one measurable

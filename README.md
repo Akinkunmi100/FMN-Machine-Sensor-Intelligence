@@ -393,10 +393,7 @@ point it at the repo — Render reads the file and sets everything up.
 `GROQ_API_KEY` isn't in the repo (obviously); Render's dashboard asks for
 it at deploy time instead.
 
-**Live URL:** not deployed yet — this step is waiting on a Render service
-actually being created from the GitHub repo. Everything the deploy needs
-(Dockerfile, render.yaml) is written and each build step has been checked
-individually; I just haven't had a live Render instance to point it at.
+**Live URL:** https://predictive-maintenance-ypxa.onrender.com/
 
 ### If you want to check my work
 
@@ -422,7 +419,7 @@ Being upfront about what this doesn't do, or doesn't do perfectly:
   evaluable breakdown in testing is a genuinely good result, but it's a
   result from a small sample, not a guarantee. I've been careful to phrase
   this as "caught everything we tested against," never "never misses."
-- **Roughly 3 out of every 4 alerts turn out to be false alarms** at the
+- **Roughly 3 out of every 5 alerts turn out to be false alarms** at the
   threshold this is currently set to. That's an accepted trade-off given
   how much worse a missed breakdown is than an unnecessary inspection, but
   it's the kind of thing a plant team should be told up front, not
