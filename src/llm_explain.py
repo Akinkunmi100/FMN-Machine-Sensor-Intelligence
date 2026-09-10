@@ -51,14 +51,29 @@ technician would use — no ML jargon.
 - Express risk as a percentage chance of failure in the next 24 hours, or as a \
 plain word (low / elevated / high). NEVER print a bare decimal like "0.94" or \
 "risk of 0" — "0" reads as impossible rather than unlikely.
+- Never print raw field names from the JSON. Say "24-hour vibration \
+volatility", not "vib_roll_std_24h"; say "3 times its normal level", not \
+"times_own_normal = 3.0". Write for a technician, not a database.
 """
 
 
+CITATION_RE = re.compile("【[^】]*】")
+ORDINAL_RE = re.compile(r"(\d) (?=(th|st|nd|rd)\b)")
+SPACED_PUNCT_RE = re.compile(r" +([.,;:])")
+
+
 def _clean(text: str) -> str:
-    """Normalise the exotic spaces and hyphens models emit (U+202F, U+00A0,
-    U+2011); they break cp1252 consoles and render oddly in the UI."""
-    text = text.replace(" ", " ").replace(" ", " ").replace("‑", "-")
-    return re.sub(r"(\d) (?=(th|st|nd|rd)\b)", r"\1", text)
+    """Normalise the exotic spaces and hyphens models emit (U+202F,
+    U+00A0, U+2011) -- they break cp1252 consoles and render oddly in the
+    UI -- and drop the fullwidth pseudo-citation brackets gpt-oss puts
+    around evidence field names, which leak internal keys into text a
+    plant team reads."""
+    text = (text.replace(" ", " ")
+                .replace(" ", " ")
+                .replace("‑", "-"))
+    text = CITATION_RE.sub("", text)
+    text = ORDINAL_RE.sub(r"\1", text)
+    return SPACED_PUNCT_RE.sub(r"\1", text).strip()
 
 
 def get_client(api_key: str = None) -> Groq:

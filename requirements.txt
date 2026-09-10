@@ -5,3 +5,10 @@ xgboost==3.4.1
 joblib==1.5.3
 groq==1.7.0
 python-dotenv==1.0.1
+
+# Web app (Phase 4). fastapi is pinned >=0.141: earlier releases pass
+# `on_startup` to Starlette's Router, which starlette 1.x removed, and the
+# app fails to import.
+fastapi==0.141.1
+uvicorn==0.52.4
+pyarrow==25.0.1
