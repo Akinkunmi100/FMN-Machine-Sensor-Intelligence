@@ -15,5 +15,19 @@ export default defineConfig({
       },
     },
   },
-  build: { outDir: "dist", emptyOutDir: true },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          charts: ["recharts"],
+        },
+      },
+    },
+    // Recharts is intentionally shipped as one lazy vendor chunk. Its
+    // minified size is just over Vite's default warning threshold, while the
+    // application code itself remains small and cacheable separately.
+    chunkSizeWarningLimit: 600,
+  },
 });
