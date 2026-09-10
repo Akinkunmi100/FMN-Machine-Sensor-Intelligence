@@ -9,49 +9,55 @@ import {
   YAxis,
 } from "recharts";
 
-// Temperature and vibration are on different scales and different units, so
-// they get their own charts rather than a dual y-axis — a dual axis lets you
-// imply any correlation you like by sliding one scale against the other.
-// Maintenance resets are marked, since Phase 0 found 77% of them follow the
-// failure they appear to precede.
+// Temperature and vibration are different units on different scales, so they
+// get their own charts rather than a dual y-axis — a dual axis lets you imply
+// any correlation you like by sliding one scale against the other.
+//
+// Maintenance resets are marked because Phase 0 found 77% of them follow the
+// breakdown they appear to precede; seeing the reset land on top of the
+// failure is the clearest way to convey that.
+
+const SERIES = [
+  { key: "vibration_mm_s", label: "Vibration", unit: "mm/s", color: "var(--series-1)" },
+  { key: "temperature_c", label: "Temperature", unit: "°C", color: "var(--series-2)" },
+];
 
 export default function SensorChart({ history }) {
   if (!history || history.length === 0) {
-    return <p className="muted">No sensor history in range.</p>;
+    return <p className="muted tiny">No sensor history in range.</p>;
   }
 
   const data = history.map((h) => ({
-    t: h.timestamp.slice(5, 16),
-    temperature_c: h.temperature_c,
+    label: h.timestamp.slice(5, 16),
     vibration_mm_s: h.vibration_mm_s,
+    temperature_c: h.temperature_c,
   }));
   const resets = history.filter((h) => h.maintenance_reset);
   const failures = history.filter((h) => h.failure_event);
 
-  const series = [
-    { key: "vibration_mm_s", label: "Vibration (mm/s)", color: "var(--series-1)" },
-    { key: "temperature_c", label: "Temperature (°C)", color: "var(--series-2)" },
-  ];
+  const axis = { fontSize: 10, fill: "var(--ink-muted)", fontFamily: "var(--mono)" };
 
   return (
     <div className="chart">
-      {series.map((s) => (
+      {SERIES.map((s) => (
         <div key={s.key}>
-          <p className="tiny muted">{s.label}</p>
-          <ResponsiveContainer width="100%" height={130}>
-            <LineChart data={data} margin={{ top: 4, right: 12, bottom: 4, left: 0 }}>
+          <p className="chart-label">
+            {s.label} <span className="muted">({s.unit})</span>
+          </p>
+          <ResponsiveContainer width="100%" height={132}>
+            <LineChart data={data} margin={{ top: 4, right: 14, bottom: 2, left: 0 }}>
               <CartesianGrid stroke="var(--grid)" vertical={false} />
-              <XAxis
-                dataKey="t"
-                tick={{ fontSize: 10, fill: "var(--ink-muted)" }}
-                minTickGap={56}
+              <XAxis dataKey="label" tick={axis} minTickGap={58} tickLine={false}
+                     stroke="var(--rule-strong)" />
+              <YAxis tick={axis} width={40} tickLine={false}
+                     stroke="var(--rule-strong)" domain={["auto", "auto"]} />
+              <Tooltip
+                contentStyle={{
+                  fontSize: 12, fontFamily: "var(--mono)",
+                  background: "var(--surface)", border: "1px solid var(--rule-strong)",
+                  borderRadius: 4, color: "var(--ink)",
+                }}
               />
-              <YAxis
-                tick={{ fontSize: 10, fill: "var(--ink-muted)" }}
-                width={38}
-                domain={["auto", "auto"]}
-              />
-              <Tooltip contentStyle={{ fontSize: 12 }} />
               {resets.map((r) => (
                 <ReferenceLine
                   key={`reset-${r.timestamp}`}
@@ -64,7 +70,7 @@ export default function SensorChart({ history }) {
                 <ReferenceLine
                   key={`fail-${f.timestamp}`}
                   x={f.timestamp.slice(5, 16)}
-                  stroke="var(--status-critical)"
+                  stroke="var(--sev-high)"
                   strokeWidth={2}
                 />
               ))}
@@ -72,7 +78,7 @@ export default function SensorChart({ history }) {
                 type="monotone"
                 dataKey={s.key}
                 stroke={s.color}
-                strokeWidth={1.8}
+                strokeWidth={1.6}
                 dot={false}
                 isAnimationActive={false}
               />
@@ -80,9 +86,25 @@ export default function SensorChart({ history }) {
           </ResponsiveContainer>
         </div>
       ))}
-      <p className="tiny muted">
-        Dashed line = maintenance reset · solid red = recorded breakdown
-      </p>
+
+      <div className="chart-legend">
+        <span className="legend-item">
+          <span className="legend-swatch" style={{ background: "var(--series-1)" }} />
+          Vibration
+        </span>
+        <span className="legend-item">
+          <span className="legend-swatch" style={{ background: "var(--series-2)" }} />
+          Temperature
+        </span>
+        <span className="legend-item">
+          <span className="legend-swatch dashed" />
+          Maintenance reset
+        </span>
+        <span className="legend-item">
+          <span className="legend-swatch" style={{ background: "var(--sev-high)", height: 11, width: 2 }} />
+          Breakdown
+        </span>
+      </div>
     </div>
   );
 }
