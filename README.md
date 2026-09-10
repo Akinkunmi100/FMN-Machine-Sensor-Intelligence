@@ -164,19 +164,34 @@ the steady one, every run.
 
 `src/llm_qa.py` is deliberately two stages:
 
-1. **Retrieve** — the question is parsed with plain regex (machine IDs,
-   line names, time windows, "top N") into filters, then real rows are
-   pulled from the scored dataset via `risk_context.query()`. No LLM call
-   happens in this stage, so it cannot hallucinate a filter.
+1. **Retrieve** — the question is parsed with plain regex into filters —
+   machine ID, line, **risk band** ("high risk," "watchlist," "safe"),
+   **date** (both relative, "last 3 days," and absolute, "April 8th" or
+   "2026-04-08"), and "top N" — then real rows are pulled from the scored
+   dataset via `risk_context.query()`. No LLM call happens in this stage, so
+   it cannot hallucinate a filter. (An earlier version computed whether a
+   question was risk-related but never actually filtered by band before
+   handing evidence to the model — a real gap against the "filtered by
+   machine, date range, or risk level" requirement, caught in review and
+   fixed: band and absolute-date filters are now applied at retrieval, not
+   left for the LLM to sift out of the full fleet itself.)
 2. **Answer** — the retrieved rows (and only the retrieved rows) are handed
-   to the LLM with instructions to answer strictly from that evidence and to
-   say plainly when something isn't in it.
+   to the LLM with instructions to answer strictly from that evidence, say
+   plainly when something isn't in it, summarize a uniform result rather than
+   enumerating every machine, and never use markdown (the UI displays plain
+   text, so `**bold**` would show as literal asterisks).
 
 Asked *"Which machine has the highest oil pressure?"* — a column that
 doesn't exist in this dataset — the system responds that no oil-pressure
-reading is available rather than inventing one. Every answer ships with the
-retrieved evidence attached, viewable in the UI ("show the records this
-used"), so a wrong answer can always be traced back to what was retrieved.
+reading is available rather than inventing one. Asked *"which machines are
+high risk right now?"* when none are, it says so in one sentence instead of
+dumping the full fleet list. Counts (e.g. "all 17 machines") are computed by
+code and handed to the model directly rather than left for it to count a
+list itself — an LLM miscounting a 17-item array is a real failure mode that
+was observed and fixed during review, not a hypothetical one. Every answer
+ships with the retrieved evidence attached, viewable in the UI ("show the
+records this used"), so a wrong answer can always be traced back to what was
+retrieved.
 
 ### The trend chart is walk-forward out-of-sample — deliberately not the shipped model
 
@@ -300,7 +315,26 @@ python src/test_llm_grounded.py      # groundedness verification (needs GROQ_API
   Flagged here rather than silently fixed or silently ignored.
 - **Explanation caching** is per `(machine_id, as_of)` to avoid re-billing
   Groq on UI re-renders — a cache miss always makes a live call, and it is
-  never precomputed.
+  never precomputed. Bounded to 500 entries (simple FIFO eviction) so a
+  long-lived server process can't grow this without limit.
+- **Groq rate limits are real and were hit during testing** (8,000 tokens/min
+  on the on-demand tier used here). Back-to-back explanation or Q&A requests
+  can return a 429 from the provider. The backend never surfaces that raw
+  error to the UI — it logs the real cause server-side and returns a plain
+  "temporarily unavailable, try again shortly" message — but under
+  concurrent stakeholder usage this is a genuine capacity ceiling, not just
+  an edge case. A paid Groq tier or simple request queuing would remove it.
+- **If `GROQ_API_KEY` is missing or invalid, the app still boots and the
+  dashboard/trend chart work normally** — only "explain this risk" and the
+  ask box fail, with the same plain error message above. This is by design
+  (the risk model doesn't need an LLM to function) but is worth knowing
+  before assuming a blank explanation means the whole app is broken.
+- **A malformed or out-of-range `as_of` value returns a clear 400/404**
+  rather than a misleading error (an earlier version reported "no data for
+  machine X" when the actual problem was an unparseable timestamp — fixed).
+  A view-in-progress error no longer fails silently either: the last
+  successfully loaded data stays visible with a plain-language banner
+  explaining what didn't update.
 - **Next steps**: extend walk-forward coverage as more plant history
   accumulates; revisit the missingness treatment (forward-fill, justified
   today by ~99% of gaps being isolated single hours) if a future feed has

@@ -70,6 +70,16 @@ export default function App() {
         )}
       </header>
 
+      {/* A stale as_of or a transient request failure must stay visible even
+          though the last-good fleet is still on screen — otherwise the view
+          silently freezes with no indication anything went wrong. */}
+      {error && fleet && (
+        <div className="note warn" role="alert" style={{ marginTop: 14 }}>
+          Couldn’t update the view: {error}. Showing the last data that
+          loaded successfully ({fleet.as_of}).
+        </div>
+      )}
+
       {meta && <AskBox />}
 
       <main className="layout">

@@ -2,9 +2,9 @@ import { useState } from "react";
 import { api } from "../api.js";
 
 const EXAMPLES = [
-  "Which machines need attention right now?",
+  "Which machines are high risk right now?",
   "Has MCH-207 ever failed and when was it serviced?",
-  "What has been happening on Line C?",
+  "What happened on April 8th?",
 ];
 
 export default function AskBox() {

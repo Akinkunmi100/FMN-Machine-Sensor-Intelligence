@@ -15,7 +15,7 @@ export default function Dashboard({ fleet, loading, meta, selected, onSelect }) 
   }
   if (!fleet) return null;
 
-  const { counts, machines, as_of } = fleet;
+  const { counts, machines, as_of, not_yet_reporting = [] } = fleet;
   const calm = counts.HIGH === 0 && counts.MEDIUM === 0;
 
   return (
@@ -48,6 +48,15 @@ export default function Dashboard({ fleet, loading, meta, selected, onSelect }) 
           That is the real state of the data, not an empty screen. Use{" "}
           <strong>jump to a recorded breakdown</strong> above to watch the model
           during an actual event.
+        </p>
+      )}
+
+      {not_yet_reporting.length > 0 && (
+        <p className="note">
+          Showing {machines.length} of {fleet.total_machines} machines.{" "}
+          {not_yet_reporting.join(", ")} had not started reporting data yet
+          as of this time — not an error, just earlier than their history
+          begins.
         </p>
       )}
 

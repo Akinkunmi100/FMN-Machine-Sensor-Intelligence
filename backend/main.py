@@ -91,6 +91,18 @@ def scored_frame() -> pd.DataFrame:
     return STATE["scored"]
 
 
+def parse_as_of(as_of: str | None) -> pd.Timestamp | None:
+    """Shared parser so a malformed timestamp always gets an honest 400
+    ("bad as_of") instead of surfacing later as a misleading 404 ("no data
+    for machine X") once it hits machine_snapshot's own IndexError path."""
+    if not as_of:
+        return None
+    try:
+        return pd.Timestamp(as_of)
+    except (ValueError, TypeError):
+        raise HTTPException(400, f"could not parse as_of: {as_of!r}")
+
+
 # --------------------------------------------------------------------- meta
 @app.get("/api/meta")
 def get_meta():
@@ -123,18 +135,25 @@ def get_meta():
 # -------------------------------------------------------------------- fleet
 @app.get("/api/fleet")
 def get_fleet(as_of: str | None = Query(None, description="ISO timestamp")):
-    scored = scored_frame()
-    if as_of:
-        try:
-            cutoff = pd.Timestamp(as_of)
-        except ValueError:
-            raise HTTPException(400, f"could not parse as_of: {as_of!r}")
-        scored = scored[scored["timestamp"] <= cutoff]
-        if scored.empty:
-            raise HTTPException(404, f"no data at or before {as_of}")
+    full = scored_frame()
+    cutoff = parse_as_of(as_of)
+    scored = full[full["timestamp"] <= cutoff] if cutoff is not None else full
+    if scored.empty:
+        raise HTTPException(404, f"no data at or before {as_of}")
     fleet = fleet_snapshot(scored)
+
+    # A machine with zero rows at or before `as_of` (e.g. a cold-start machine
+    # queried before it existed) is silently absent from `fleet` — correct
+    # behaviour, but silent absence reads as a bug to a non-technical viewer.
+    # Report it explicitly instead of letting the count just look smaller.
+    total_machines = int(full["machine_id"].nunique())
+    reporting_ids = {m["machine_id"] for m in fleet}
+    not_yet_reporting = sorted(set(full["machine_id"].unique()) - reporting_ids)
+
     return {
         "as_of": max(m["as_of"] for m in fleet),
+        "total_machines": total_machines,
+        "not_yet_reporting": not_yet_reporting,
         "counts": {
             band: sum(1 for m in fleet if m["risk_band"] == band)
             for band in ("HIGH", "MEDIUM", "LOW")
@@ -148,12 +167,13 @@ def get_fleet(as_of: str | None = Query(None, description="ISO timestamp")):
 def get_machine(machine_id: str, as_of: str | None = Query(None),
                 history_hours: int = Query(168, ge=24, le=2880)):
     scored = scored_frame()
+    at = parse_as_of(as_of)
     try:
-        snap = machine_snapshot(
-            scored, machine_id, at=pd.Timestamp(as_of) if as_of else None
-        )
+        snap = machine_snapshot(scored, machine_id, at=at)
     except (ValueError, IndexError):
-        raise HTTPException(404, f"no data for machine {machine_id}")
+        detail = (f"no data for machine {machine_id}" if at is None else
+                  f"no data for machine {machine_id} at or before {as_of}")
+        raise HTTPException(404, detail)
 
     end = pd.Timestamp(snap["as_of"])
     hist = scored[(scored["machine_id"] == machine_id)
@@ -206,15 +226,25 @@ def get_trend(machine_id: str):
 
 
 # ------------------------------------------------------------------ the LLM
+EXPLANATION_CACHE_MAX = 500  # bound growth on a long-lived server; simple FIFO
+
+
+def _cache_explanation(key, result):
+    if len(EXPLANATION_CACHE) >= EXPLANATION_CACHE_MAX:
+        EXPLANATION_CACHE.pop(next(iter(EXPLANATION_CACHE)))  # oldest inserted
+    EXPLANATION_CACHE[key] = result
+
+
 @app.post("/api/machines/{machine_id}/explain")
 def explain(machine_id: str, as_of: str | None = Query(None)):
     scored = scored_frame()
+    at = parse_as_of(as_of)
     try:
-        snap = machine_snapshot(
-            scored, machine_id, at=pd.Timestamp(as_of) if as_of else None
-        )
+        snap = machine_snapshot(scored, machine_id, at=at)
     except (ValueError, IndexError):
-        raise HTTPException(404, f"no data for machine {machine_id}")
+        detail = (f"no data for machine {machine_id}" if at is None else
+                  f"no data for machine {machine_id} at or before {as_of}")
+        raise HTTPException(404, detail)
 
     key = (machine_id, snap["as_of"])
     if key in EXPLANATION_CACHE:
@@ -224,9 +254,16 @@ def explain(machine_id: str, as_of: str | None = Query(None)):
     try:
         result = llm_explain.explain_machine_risk(snap)
     except Exception as exc:
-        raise HTTPException(502, f"explanation service unavailable: {exc}")
+        # The real exception (e.g. a Groq API error, possibly carrying
+        # request detail) is logged server-side but never returned to the
+        # client verbatim -- a provider error message is not something a
+        # plant-floor UI should surface raw.
+        print(f"[explain] {machine_id} failed: {exc}")
+        raise HTTPException(
+            502, "The explanation service is temporarily unavailable. Try again shortly."
+        )
     result["cached"] = False
-    EXPLANATION_CACHE[key] = result
+    _cache_explanation(key, result)
     return result
 
 
@@ -244,7 +281,10 @@ def qa(payload: Question):
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(502, f"question service unavailable: {exc}")
+        print(f"[qa] question failed: {exc}")
+        raise HTTPException(
+            502, "The question service is temporarily unavailable. Try again shortly."
+        )
 
 
 @app.get("/api/health")
