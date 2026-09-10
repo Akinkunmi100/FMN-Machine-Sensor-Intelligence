@@ -3,6 +3,10 @@
 # Office temp/lock files
 ~$*
 
+# Frontend
+node_modules/
+frontend/dist/
+
 # Python
 __pycache__/
 *.py[cod]
