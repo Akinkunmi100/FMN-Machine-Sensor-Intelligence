@@ -1,0 +1,15 @@
+.git
+.env
+.env.example
+__pycache__
+**/__pycache__
+*.pyc
+node_modules
+frontend/dist
+frontend/node_modules
+.venv
+venv
+*.md
+FMN_AI_Internship_Technical_Assessment.docx
+~$*
+docs/

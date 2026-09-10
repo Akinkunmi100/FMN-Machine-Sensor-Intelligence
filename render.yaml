@@ -1,0 +1,23 @@
+# Render Blueprint — one Docker-based web service. The Dockerfile builds the
+# React SPA and installs the Python backend in a single image; FastAPI serves
+# both the app and /api/* from one origin, so this is the only service needed
+# (no separate static site, no CORS in production).
+#
+# Deploy: push this repo to GitHub, then in the Render dashboard choose
+# "New +" -> "Blueprint" and point it at the repo. Render reads this file
+# automatically. GROQ_API_KEY is marked sync:false, which means Render will
+# prompt for it in the dashboard rather than expecting it in this file — it
+# is never committed to the repo.
+
+services:
+  - type: web
+    name: predictive-maintenance
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
