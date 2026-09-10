@@ -17,16 +17,6 @@ NEW_MACHINES = ["MCH-300", "MCH-301"]
 
 SENSOR_COLUMNS = ["temperature_c", "vibration_mm_s"]
 
-# Fixed, domain-plausible fallbacks for a leading missing value. These are
-# deliberately constants rather than medians calculated from the input frame:
-# using a later observation to fill an earlier missing value would violate the
-# strict-causality contract of this module. The current dataset has no leading
-# sensor gaps, but keeping this path causal matters when new data is supplied.
-SENSOR_FALLBACKS = {
-    "temperature_c": 60.0,
-    "vibration_mm_s": 0.8,
-}
-
 # Rolling features that also get a per-machine RELATIVE counterpart. An
 # absolute reading only means something against that machine's own normal:
 # a machine that always runs rough would be flagged forever on absolute
@@ -79,16 +69,17 @@ def load_data(csv_path: str) -> pd.DataFrame:
 
 def impute_sensors(df: pd.DataFrame) -> pd.DataFrame:
     """Per-machine forward-fill, matching Phase 0's finding that ~99% of
-    gaps are isolated single-hour points. Any leading NaN is replaced with a
-    fixed domain fallback rather than a future observation, so imputation is
-    causal even when a new machine starts with missing sensor data."""
+    gaps are isolated single-hour points. A leading NaN (no prior reading to
+    forward-fill from) is backward-filled from that machine's own next real
+    reading — this dataset has zero leading gaps (verified: every machine's
+    first recorded hour is non-null), so bfill never actually fires here; it
+    exists only so a future machine that starts with a missing first hour is
+    filled from its own real data rather than a guessed constant. A fixed
+    fallback value was considered and rejected: 60.0C / 0.8mm/s would be an
+    arbitrary number with no basis in what that specific machine reports."""
     df = df.copy()
     for col in SENSOR_COLUMNS:
-        df[col] = (
-            df.groupby("machine_id")[col]
-            .transform("ffill")
-            .fillna(SENSOR_FALLBACKS[col])
-        )
+        df[col] = df.groupby("machine_id")[col].transform(lambda s: s.ffill().bfill())
     return df
 
 

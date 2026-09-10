@@ -230,6 +230,83 @@ def query(scored: pd.DataFrame, machines=None, line=None, band=None,
     return out.sort_values("timestamp").tail(limit)
 
 
+def fleet_activity_summary(oos: pd.DataFrame, failures: pd.DataFrame,
+                           horizon_hours: int = 24) -> dict:
+    """Real, computed history for the dashboard's landing view.
+
+    At the dataset's final hour every machine reads LOW (the last failure was
+    30 Apr 04:00), so a viewer who only sees the current snapshot sees an
+    all-calm fleet and has no way to tell the system does anything. This
+    reuses the SAME catch/lead-time method validated in
+    src/event_level_analysis.py -- run here, live, against the committed
+    walk-forward artifact, not copied as a number from a report -- so the
+    landing view can honestly say what the model has actually caught.
+    """
+    threshold = RISK_BANDS["high"]
+    scored_mask = oos["status"].str.startswith("out_of_sample")
+    oos_scored = oos[scored_mask]
+
+    events = []
+    for _, f in failures.iterrows():
+        window = oos_scored[
+            (oos_scored["machine_id"] == f["machine_id"])
+            & (oos_scored["timestamp"] >= f["timestamp"] - pd.Timedelta(hours=horizon_hours))
+            & (oos_scored["timestamp"] < f["timestamp"])
+        ]
+        if window.empty:
+            continue  # outside walk-forward coverage — not countable either way
+        alerts = window[window["risk"] >= threshold]
+        caught = not alerts.empty
+        lead_hours = (
+            round((f["timestamp"] - alerts["timestamp"].min()).total_seconds() / 3600, 1)
+            if caught else None
+        )
+        events.append({
+            "machine_id": f["machine_id"], "line": f["line"],
+            "timestamp": str(f["timestamp"]), "caught": caught,
+            "lead_hours": lead_hours,
+        })
+
+    caught_events = [e for e in events if e["caught"]]
+    lead_times = [e["lead_hours"] for e in caught_events]
+
+    most_recent = None
+    if len(failures):
+        r = failures.sort_values("timestamp").iloc[-1]
+        most_recent = {"machine_id": r["machine_id"], "line": r["line"],
+                       "timestamp": str(r["timestamp"])}
+
+    return {
+        "total_recorded_failures": int(len(failures)),
+        "evaluable_in_walk_forward": len(events),
+        "caught_in_walk_forward": len(caught_events),
+        "median_lead_hours": round(float(np.median(lead_times)), 1) if lead_times else None,
+        "min_lead_hours": round(float(np.min(lead_times)), 1) if lead_times else None,
+        "most_recent_failure": most_recent,
+        "events": events,
+    }
+
+
+def machine_sparkline(oos: pd.DataFrame, machine_id: str, points: int = 30) -> list:
+    """Compact daily-max out-of-sample risk for one machine, oldest first.
+
+    Daily MAX (not mean) is used deliberately: a single bad hour is the
+    signal that matters for "did anything happen that day," and averaging
+    would wash out a short-lived spike into invisibility.
+    """
+    g = oos[(oos["machine_id"] == machine_id)
+            & oos["status"].str.startswith("out_of_sample")].copy()
+    if g.empty:
+        return []
+    g["day"] = g["timestamp"].dt.floor("D")
+    daily = g.groupby("day")["risk"].max().reset_index()
+    daily = daily.tail(points)
+    return [
+        {"day": str(r["day"].date()), "risk": round(float(r["risk"]), 4)}
+        for _, r in daily.iterrows()
+    ]
+
+
 def band_report(scored: pd.DataFrame) -> dict:
     """What the provisional bands actually cover — the numbers needed to sign
     off (or change) the HIGH/MEDIUM cuts in Phase 4."""

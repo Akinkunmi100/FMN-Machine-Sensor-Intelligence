@@ -1,6 +1,31 @@
+import { useMemo, useState } from "react";
+import Sparkline from "./Sparkline.jsx";
+
 const pct = (v) => `${(v * 100).toFixed(v >= 0.1 ? 0 : 1)}%`;
 
+const LINES = ["Line A", "Line B", "Line C"];
+const BANDS = ["HIGH", "MEDIUM", "LOW"];
+
 export default function Dashboard({ fleet, loading, meta, selected, onSelect }) {
+  // All hooks run on every render, before any early return — a hook called
+  // only on some renders (e.g. after "if (!fleet) return null") changes the
+  // hook count between renders and crashes React (error #310). guardedFilter
+  // covers the case where `fleet` is not yet loaded.
+  const [lineFilter, setLineFilter] = useState(null);
+  const [bandFilter, setBandFilter] = useState(null);
+  const [coldFilter, setColdFilter] = useState(null); // null | true | false
+
+  const machines = fleet?.machines ?? [];
+  const filtered = useMemo(() => {
+    return machines.filter((m) => {
+      if (lineFilter && m.line !== lineFilter) return false;
+      if (bandFilter && m.risk_band !== bandFilter) return false;
+      if (coldFilter === true && !m.cold_start) return false;
+      if (coldFilter === false && m.cold_start) return false;
+      return true;
+    });
+  }, [machines, lineFilter, bandFilter, coldFilter]);
+
   if (loading && !fleet) {
     return (
       <section className="panel fleet">
@@ -15,8 +40,16 @@ export default function Dashboard({ fleet, loading, meta, selected, onSelect }) 
   }
   if (!fleet) return null;
 
-  const { counts, machines, as_of, not_yet_reporting = [] } = fleet;
+  const { counts, as_of, not_yet_reporting = [] } = fleet;
   const calm = counts.HIGH === 0 && counts.MEDIUM === 0;
+  const threshold = meta?.risk_bands?.high ?? 0.2;
+
+  const anyFilterActive = lineFilter || bandFilter || coldFilter !== null;
+  const clearFilters = () => {
+    setLineFilter(null);
+    setBandFilter(null);
+    setColdFilter(null);
+  };
 
   return (
     <section className="panel fleet">
@@ -26,7 +59,7 @@ export default function Dashboard({ fleet, loading, meta, selected, onSelect }) 
       </div>
 
       <div className="counts">
-        {["HIGH", "MEDIUM", "LOW"].map((band) => (
+        {BANDS.map((band) => (
           <div
             key={band}
             className={[
@@ -43,11 +76,8 @@ export default function Dashboard({ fleet, loading, meta, selected, onSelect }) 
 
       {calm && (
         <p className="note">
-          Every machine is in the low band at this moment — the last recorded
-          breakdown was 30 April 04:00, so nothing is inside a warning window.
-          That is the real state of the data, not an empty screen. Use{" "}
-          <strong>jump to a recorded breakdown</strong> above to watch the model
-          during an actual event.
+          Every machine is in the low band at this moment — see “historical
+          model performance” above for what the system has actually caught.
         </p>
       )}
 
@@ -60,6 +90,45 @@ export default function Dashboard({ fleet, loading, meta, selected, onSelect }) 
         </p>
       )}
 
+      <div className="filterbar">
+        <span className="label">Filter</span>
+        <div className="filter-group">
+          {LINES.map((l) => (
+            <button
+              key={l}
+              className={`filter-chip${lineFilter === l ? " active" : ""}`}
+              onClick={() => setLineFilter(lineFilter === l ? null : l)}
+            >
+              {l.replace("Line ", "L")}
+            </button>
+          ))}
+        </div>
+        <div className="filter-group">
+          {BANDS.map((b) => (
+            <button
+              key={b}
+              className={`filter-chip${bandFilter === b ? " active" : ""}`}
+              onClick={() => setBandFilter(bandFilter === b ? null : b)}
+            >
+              {b}
+            </button>
+          ))}
+        </div>
+        <div className="filter-group">
+          <button
+            className={`filter-chip${coldFilter === true ? " active" : ""}`}
+            onClick={() => setColdFilter(coldFilter === true ? null : true)}
+          >
+            New machines
+          </button>
+        </div>
+        {anyFilterActive && (
+          <button className="filter-clear" onClick={clearFilters}>
+            Clear
+          </button>
+        )}
+      </div>
+
       <table className="fleet-table">
         <thead>
           <tr>
@@ -69,10 +138,11 @@ export default function Dashboard({ fleet, loading, meta, selected, onSelect }) 
             <th>State</th>
             <th className="num">Vib</th>
             <th className="num">Temp</th>
+            <th>30-day history</th>
           </tr>
         </thead>
         <tbody>
-          {machines.map((m) => {
+          {filtered.map((m) => {
             const band = m.risk_band.toLowerCase();
             return (
               <tr
@@ -104,9 +174,19 @@ export default function Dashboard({ fleet, loading, meta, selected, onSelect }) 
                 </td>
                 <td className="num mono">{m.vibration_mm_s.toFixed(2)}</td>
                 <td className="num mono">{m.temperature_c.toFixed(1)}</td>
+                <td className="sparkline-cell">
+                  <Sparkline points={m.sparkline} threshold={threshold} />
+                </td>
               </tr>
             );
           })}
+          {filtered.length === 0 && (
+            <tr>
+              <td colSpan={7} className="no-results">
+                No machines match the current filters.
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
 

@@ -4,6 +4,8 @@ import Dashboard from "./components/Dashboard.jsx";
 import MachineDetail from "./components/MachineDetail.jsx";
 import AskBox from "./components/AskBox.jsx";
 import TimeControl from "./components/TimeControl.jsx";
+import ActivityStrip from "./components/ActivityStrip.jsx";
+import ThemeToggle from "./components/ThemeToggle.jsx";
 
 export default function App() {
   const [meta, setMeta] = useState(null);
@@ -51,23 +53,40 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div>
-          <h1>Plant Failure Risk</h1>
-          <p className="sub">
-            Chance each machine fails in the next{" "}
-            {meta ? meta.horizon_hours : 24} hours
-          </p>
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path
+                d="M12 2L3 7v6c0 5 4 8.5 9 9 5-.5 9-4 9-9V7l-9-5z"
+                stroke="white" strokeWidth="1.6" strokeLinejoin="round"
+              />
+              <path
+                d="M8.5 12.5l2 2 5-5"
+                stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+          <div>
+            <h1>Plant Failure Risk</h1>
+            <p className="sub">
+              Chance each machine fails in the next{" "}
+              {meta ? meta.horizon_hours : 24} hours
+            </p>
+          </div>
         </div>
-        {meta && (
-          <TimeControl
-            meta={meta}
-            asOf={asOf}
-            onChange={(t) => {
-              setAsOf(t);
-              setSelected(null);
-            }}
-          />
-        )}
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+          {meta && (
+            <TimeControl
+              meta={meta}
+              asOf={asOf}
+              onChange={(t) => {
+                setAsOf(t);
+                setSelected(null);
+              }}
+            />
+          )}
+          <ThemeToggle />
+        </div>
       </header>
 
       {/* A stale as_of or a transient request failure must stay visible even
@@ -79,6 +98,8 @@ export default function App() {
           loaded successfully ({fleet.as_of}).
         </div>
       )}
+
+      {meta && <ActivityStrip meta={meta} onJumpTo={setAsOf} />}
 
       {meta && <AskBox />}
 

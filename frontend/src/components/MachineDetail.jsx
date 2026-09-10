@@ -151,6 +151,11 @@ export default function MachineDetail({ machineId, asOf, meta }) {
       </p>
 
       <h3>Risk over time</h3>
+      <p className="section-caption">
+        How the model’s confidence in a breakdown moved week by week —
+        scored honestly, using only what was knowable at each point in time,
+        not with the benefit of hindsight.
+      </p>
       {trend ? (
         <TrendChart trend={trend} meta={meta} />
       ) : (
@@ -158,6 +163,11 @@ export default function MachineDetail({ machineId, asOf, meta }) {
       )}
 
       <h3>Sensor history</h3>
+      <p className="section-caption">
+        Raw temperature and vibration readings for this machine, with
+        maintenance visits (dashed) and recorded breakdowns (solid red)
+        marked so you can see how sensor behaviour changed around each one.
+      </p>
       <SensorChart history={snap.sensor_history} />
     </section>
   );

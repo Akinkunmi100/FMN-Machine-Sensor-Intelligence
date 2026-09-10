@@ -39,9 +39,11 @@ from features import NEW_MACHINES  # noqa: E402
 from risk_context import (  # noqa: E402
     RISK_BANDS,
     band_report,
+    fleet_activity_summary,
     fleet_snapshot,
     load_model,
     machine_snapshot,
+    machine_sparkline,
     score_frame,
 )
 
@@ -86,6 +88,12 @@ async def lifespan(app: FastAPI):
         .sort_values("timestamp")
     )
     STATE["failures"] = failures
+    # Computed once at startup from the committed walk-forward artifact, not
+    # pasted from a report — see fleet_activity_summary's docstring. Cheap
+    # (a handful of window lookups against ~23k rows) and never changes
+    # between requests, so there is no reason to recompute it per call.
+    STATE["activity"] = (fleet_activity_summary(STATE["oos"], failures)
+                         if STATE["oos"] is not None else None)
     print(f"[startup] scored {len(scored):,} machine-hours, "
           f"{scored['machine_id'].nunique()} machines, "
           f"{len(failures)} recorded failures, "
@@ -150,6 +158,11 @@ def get_meta():
              "timestamp": str(r["timestamp"])}
             for _, r in STATE["failures"].iterrows()
         ],
+        # What the model has actually caught historically -- real numbers
+        # computed at startup from the committed walk-forward artifact, shown
+        # on the landing view so a calm current snapshot isn't the only thing
+        # a first-time visitor sees.
+        "activity": STATE["activity"],
     }
 
 
@@ -170,6 +183,16 @@ def get_fleet(as_of: str | None = Query(None, description="ISO timestamp")):
     total_machines = int(full["machine_id"].nunique())
     reporting_ids = {m["machine_id"] for m in fleet}
     not_yet_reporting = sorted(set(full["machine_id"].unique()) - reporting_ids)
+
+    # A machine's CURRENT risk can be 0.0 while its recent history still had
+    # a real spike -- the sparkline is what lets a stakeholder see that at a
+    # glance in the fleet table, instead of the single latest number implying
+    # a machine has always been quiet. Built from the same walk-forward
+    # artifact as the trend chart, so it is honest, not the in-sample score.
+    oos = STATE.get("oos")
+    if oos is not None:
+        for m in fleet:
+            m["sparkline"] = machine_sparkline(oos, m["machine_id"])
 
     return {
         "as_of": max(m["as_of"] for m in fleet),
