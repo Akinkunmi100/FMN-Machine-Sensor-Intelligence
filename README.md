@@ -1,371 +1,510 @@
 # Predictive Maintenance — Plant Failure Risk
 
-An end-to-end system for a manufacturing plant: predicts which machines are at
-risk of failure in the next 24 hours, explains why using a live LLM call
-grounded in that machine's real sensor data, shows how risk has moved over
-time, and answers free-text questions from a plant manager.
+This is a working system for a manufacturing plant: it looks at hourly sensor
+readings from a fleet of machines and predicts which ones are likely to fail
+in the next 24 hours. When a machine looks risky, you can ask it *why* and
+get a real, plain-English answer grounded in that machine's own numbers —
+not a canned message with a value swapped in. You can also just type a
+question ("which machines need attention?", "what happened on Line C last
+week?") and get an answer pulled from the actual data.
 
-Every number in this README is reproducible from this repo — see
-[How to run](#how-to-run).
-
----
+If you're technical, everything below is reproducible — every command
+listed actually runs against this repo, and I've tried to say exactly which
+script produced which number. If you're not, skip straight to whichever
+section title makes sense to you; I've tried to keep the plain-English
+explanation up front in each one before the technical detail underneath it.
 
 ## Problem understanding
 
-The plant has 15 machines with 120 days of hourly sensor history and 2 new
-machines with only ~3 days each. Failures are rare — **17 events in 43,354
-machine-hours (0.039%)** — so this is a severe class-imbalance problem, not a
-routine classification task. A model that never predicts failure scores
-99.96% accuracy and is worthless; the real questions are *how much warning
-does a real alert give*, and *how many false alarms does that warning cost*.
+Here's how I read the brief. The plant has 15 machines with about four
+months of hourly history each, plus 2 machines that only came online three
+days before the data ends. Somewhere in that data, 17 real failures
+happened — out of 43,354 machine-hours total. That's a failure roughly
+once every 2,500 hours, and it's the thing that makes this project harder
+than a normal prediction problem.
 
-The dataset also contains a trap: `run_hours_since_maintenance` resets to 0
-after maintenance, and **77.3% of those resets coincide with or immediately
-follow the failure they would appear to predict** (Phase 0 finding). Resets
-are reactive, not preventive. Any feature built carelessly from this column
-would leak the answer.
+Here's why that matters in practice: if you built a model that simply
+never predicts a failure, it would be right 99.96% of the time and would
+be completely useless — no such model would ever warn anyone about
+anything. So the real task isn't "get a high accuracy score," it's "catch
+real breakdowns early enough to act on them, without crying wolf so often
+that people stop trusting the alerts." Those two goals pull against each
+other, and most of the modeling decisions in this project come down to how
+that tension got resolved.
+
+There was also a trap sitting in the data that took a bit of digging to
+find. One of the columns, `run_hours_since_maintenance`, resets to zero
+whenever a machine gets serviced. My first instinct was that this should be
+a strong predictor — a machine running a long time since its last service
+"should" be more likely to fail. But when I actually checked, 77% of those
+resets happen at the same time as, or immediately after, the failure they'd
+seem to predict. In other words, maintenance here is mostly *reactive*:
+something breaks, then it gets serviced. If I'd built a feature off this
+column carelessly — say, "hours until the next reset" — the model would
+have looked shockingly accurate for entirely the wrong reason: it would
+just be reading the outcome I was trying to predict. I flagged this in
+Phase 0 of the project and built the features around it deliberately (more
+on that below).
 
 ## Approach
 
-### Risk definition and horizon
+### Defining "risk" so it actually means something
 
-> **Risk = P(a failure event occurs on this machine within the next 24 hours)**
+"At risk" is a vague phrase until you pin down a time window, so:
 
-For every machine-hour `t`, the label is `1` if `failure_event = 1` occurs in
-`(t, t+24h]`. The last 24 hours of each machine's history are dropped rather
-than labelled `0` — the true outcome there is unknown, and calling an unknown
-a negative would poison training.
+> **Risk = the probability that a machine has a failure event in the next 24 hours.**
 
-### Metric
+Concretely: for every hour in the data, I look forward 24 hours and label
+that hour "1" if a failure happens somewhere in that window, "0" if not.
+The very last 24 hours of each machine's history get dropped rather than
+labeled "0," because I genuinely don't know what happens after the data
+ends — labeling an unknown as "safe" would have been lying to the model.
 
-**AUC-PR**, not accuracy or ROC-AUC. At a 0.039% positive rate, ROC-AUC is
-flattered by a huge true-negative pool; AUC-PR ignores true negatives
-entirely and answers the question that matters — of the hours flagged, how
-many are real. The naive floor (always predict no-failure) is the positive
-rate itself, giving an honest baseline instead of a meaningless 99.96%.
+### Choosing a metric that can't be fooled by the imbalance
 
-AUC-PR still only measures ranking, not warnings. The real model choice was
-made on **event-level** metrics instead — see below.
+Given how rare failures are, accuracy is a trap (see above), and the
+usual next-best option — ROC-AUC — is also flattered here because it gets
+credit for correctly ignoring a huge pile of obviously-safe hours. I used
+**AUC-PR** (area under the precision-recall curve) instead, which only
+cares about how good you are at the part that's actually hard: correctly
+picking out the rare positive cases from the huge pool of negatives. A
+model that never predicts failure scores essentially 0 on this metric,
+which is a much more honest floor to beat than 99.96%.
 
-### Model selection
+That said, AUC-PR still only tells you how good the model's *ranking* is —
+it doesn't tell you how many real breakdowns you'd have caught, or how many
+false alarms you'd have to deal with. For the actual model choice, I
+switched to counting real events: did a real breakdown get a warning
+before it happened, and how many separate false-alarm episodes did that
+cost? That's the number that should drive a decision like this, and it's
+what I used.
 
-Six candidates were compared on identical time-ordered splits (a primary
-80/20 split plus two expanding-window CV folds, each protected by a 24-hour
-embargo so no training row's label depends on test-side data). Full
-comparison, event-level reasoning, and two rounds of re-examination are in
-[docs/model_selection.md](docs/model_selection.md) — the short version:
+### Picking the model
 
-**Random Forest** (300 trees, `max_depth=8`, `min_samples_leaf=20`, balanced
-class weights) was chosen because it **dominates on both axes at once**:
-across all three held-out windows it catches **19 of 19 real breakdowns**
-with **38 total false-alarm episodes**, against Logistic Regression's 18/19
-with 39. When one candidate is better on both missed failures *and* false
-alarms, no cost ratio between "missed failure" and "unnecessary inspection"
-needs to be assumed — every ratio gives the same answer. Boosting variants
-(XGBoost, HistGradientBoosting) were tested and rejected; a training-free
-probability-averaged ensemble was tested and didn't beat the single best
-model on 2 of 3 splits, so no ensemble or stacked meta-learner was built.
+I compared six candidates — logistic regression, a shallow decision tree,
+random forest, two gradient boosting variants, and a simple averaged
+ensemble — all evaluated the same way: time-ordered splits (never randomly
+shuffled, since sensor readings an hour apart are obviously related to each
+other), with a 24-hour buffer around each split so that no training example
+could "see into" the test period through its own label. The full
+comparison, including two rounds of me second-guessing my own first choice,
+lives in [docs/model_selection.md](docs/model_selection.md); the short
+version is:
 
-The row-level metrics (which count *hours*, not breakdowns) initially
-favoured Logistic Regression — 164 "positive" test rows are only 7 real
-events, each inflated into a 24-hour window, so hour-level recall rewarded a
-model that later turned out to miss an actual breakdown. This mismatch is
-documented in detail in the model-selection writeup because it's the single
-easiest way to pick the wrong model from a metrics table that looks
-convincing.
+**A random forest** (300 trees, fairly shallow, tuned to avoid overfitting
+a handful of rare events) won because it did better on *both* things that
+matter — across three separate held-out test periods, it caught **19 of 19**
+real breakdowns while raising 38 total false-alarm episodes, compared to
+logistic regression's 18 of 19 catches and 39 episodes. When one model beats
+another on both "fewer missed failures" and "fewer false alarms" at once,
+you don't need to argue about how expensive a missed failure is relative to
+an unnecessary inspection — the answer comes out the same either way.
+Boosting didn't help here (small, noisy datasets are its weak spot), and a
+simple average of multiple models didn't beat the random forest on its own,
+so I didn't build a fancier ensemble just to say I had one.
 
-### Threshold and risk bands
+One thing worth calling out: if you only look at row-by-row metrics (which
+count individual *hours*, not breakdowns), logistic regression actually
+looks better at first. The reason is a little subtle — 164 "positive" test
+rows sounds like a lot, but they're really only 7 actual breakdowns, each
+one stretched across a 24-hour window. A model can score well on
+hour-counting while still missing an entire real event, which is exactly
+what happened here. I only trusted the event-based count for the final
+decision, and I'd recommend anyone reviewing this project do the same —
+it's the easiest way to accidentally pick the wrong model from a metrics
+table that looks convincing at a glance.
 
-The dashboard uses three bands, chosen from the model's actual score
-distribution rather than round numbers:
+### Where the alert line sits
+
+The dashboard sorts machines into three bands:
 
 | Band | Cutoff | Share of machine-hours |
 |---|---|---|
-| **HIGH** | ≥ 0.20 | 2.8% |
-| **MEDIUM** (watch) | ≥ 0.02 | 1.1–2.2% |
-| **LOW** | < 0.02 | ~96% |
+| **High** | 0.20 or above | about 2.8% |
+| **Watch** | 0.02 to 0.20 | 1–2% |
+| **Low** | below 0.02 | roughly 96% |
 
-0.20 is the validated alert threshold — the highest cutoff that still catches
-every recoverable breakdown in every held-out window, confirmed against
-**walk-forward out-of-sample scores**, not the in-sample distribution (see
-below), so it isn't inflated by the model grading its own homework. The score
-distribution is strongly bimodal (over 90% of hours score exactly 0.0000),
-which is why the watch band is thin no matter where it's cut — that's
-reported as a property of the data, not hidden.
+0.20 isn't a round number I picked for convenience — it's the highest
+threshold that still caught every recoverable breakdown across all three
+test periods, checked against **out-of-sample** scores (explained a bit
+further down) so it isn't a threshold that only looks good because the
+model had already seen the answer. The model's risk scores are heavily
+skewed toward zero — over 90% of all machine-hours score exactly 0.0000 —
+which is why the "watch" band ends up thin no matter where you draw it.
+That's a real property of this data, not something I smoothed over.
 
-### What actually predicts failure
+### What the model is actually paying attention to
 
-| Feature | Importance |
+| What it's looking at | How much it matters |
 |---|---|
-| `temp_roll_mean_24h_rel` (24h mean temp, relative to this machine's own median) | 0.188 |
-| `vib_roll_std_24h_rel` (24h vibration volatility, relative) | 0.157 |
-| `temp_roll_mean_6h_rel` | 0.154 |
-| `vib_roll_std_24h` (absolute) | 0.115 |
-| `temp_roll_std_24h` (absolute) | 0.102 |
-| `run_hours_since_maintenance` | 0.001 |
+| 24h average temperature, relative to that machine's own normal | highest |
+| 24h vibration volatility, relative to that machine's own normal | 2nd |
+| 6h average temperature, relative to that machine's own normal | 3rd |
+| 24h vibration volatility (raw value) | 4th |
+| 24h temperature volatility (raw value) | 5th |
+| Hours since last maintenance | almost nothing (0.1% of total weight) |
 
-**Per-machine relative features carry 70.7% of total importance.** Every
-rolling statistic has a counterpart divided by that machine's own running
-median (`shift(1).expanding(min_periods=24).median()` — strictly backward
-in time, verified by `src/test_no_leakage.py`). A reading that's high in
-absolute terms but normal *for that specific machine* isn't a warning sign;
-one that's only modestly elevated but far above *that machine's own* history
-is. Offered both views, the model overwhelmingly prefers the relative one —
-adding these features and retuning around them cut false alarms by 30% at
-identical event capture (see the model-selection doc, §10, for the full
-before/after and the two wrong turns taken to get there).
+The single biggest design decision in the whole feature set: instead of
+only giving the model raw sensor values, I also gave it each value
+*relative to that specific machine's own recent history* — is this reading
+high for THIS machine, not high in some generic sense. That distinction
+turns out to matter a lot. A vibration reading that's totally normal for
+one machine might be a red flag on another that usually runs much
+smoother, and a model that only sees raw numbers can't tell the difference.
+Once I added these relative features and re-tuned around them, false
+alarms dropped by roughly 30% for the same number of caught breakdowns —
+which is a meaningful improvement, and it took two wrong turns to get
+there (also documented in the model-selection writeup, since I think how I
+got it wrong twice is more useful than pretending I got it right the first
+time).
 
-`run_hours_since_maintenance` used causally (no forward-looking version) is
-nearly irrelevant to the model. This is a quiet confirmation the leakage
-guard works: the intuitive "wear since service" signal is genuinely weak,
-while a version that leaked the reactive reset would have looked
-spectacularly — and falsely — predictive.
+Also worth noting: "hours since last maintenance," when used honestly (no
+peeking at future resets), turns out to barely matter to the model. Given
+what I found about maintenance being reactive rather than preventive, I
+actually take this as a good sign — it means the leakage trap didn't sneak
+back in through the side door. If a forward-looking version of that column
+had somehow ended up in the feature set, it would have looked *extremely*
+predictive, for entirely the wrong reason.
 
-### Cold-start strategy
+### The two brand-new machines
 
-MCH-300 and MCH-301 have 72 hours of history each and zero recorded
-failures. They are **excluded from training and evaluation** — three days
-can't support a 24-hour horizon label, and zero positives means nothing to
-score recall against.
+MCH-300 and MCH-301 have only 72 hours of history each, with zero recorded
+failures between them. I made a deliberate call to leave them out of both
+training and evaluation — three days isn't enough to build a meaningful
+24-hour-ahead label, and with no failures on record there's nothing to
+check a "did it catch this" score against anyway.
 
-They remain **scoreable**: `machine_id` is deliberately never a feature, so
-the model reads only physically-grounded sensor signal and generalizes to
-machines it has never trained on. Their relative features fall back to
-`1.0` ("at its own normal") until 24 hours of history accumulate, so early
-on they lean more heavily on absolute features than an established machine
-would. Their dashboard scores carry a visible "new" flag and lower-confidence
-language everywhere they appear (fleet table, drill-down, LLM explanations)
-— these are real predictions, but literally unvalidated, since there is no
-recorded failure to check them against.
+They still get scored, though. I made sure `machine_id` itself is never a
+feature the model can use, specifically so a model trained on the other 15
+machines still generalizes to a brand-new one it's never seen. Their
+"relative to own history" features fall back to a neutral "at its own
+normal" value until they've built up 24 hours of their own baseline, so
+early on they lean more on the raw sensor readings than an established
+machine would. Anywhere these two machines show up in the app — the fleet
+table, the drill-down, the AI explanations — they're marked as new, and the
+language around them is deliberately more hedged. These are real
+predictions, but there's genuinely no way to check them against a real
+outcome yet, and I didn't want the interface implying more confidence than
+that.
 
-### How the LLM stays grounded
+### Keeping the AI explanations honest
 
-`src/llm_explain.py` sends the model **only** a JSON snapshot built by
-`src/risk_context.py` — current readings, each driver's percentile against
-that machine's own history, and the `times_own_normal` ratio the risk model
-itself keys on. The prompt requires the explanation to name the standout
-driver using that ratio, to say plainly when nothing is anomalous rather
-than manufacture concern, and forbids raw field names or bare-decimal risk
-("0.94" reads as a probability; "94% chance" reads as a warning).
+This was the part of the brief I was most careful about, because it's the
+easiest part of a project like this to fake. It would be trivial to write a
+template like `"{machine} is at {risk}% risk because vibration is high"`
+and call it an explanation — but that's not an explanation, it's a
+find-and-replace. If swapping in different sensor numbers wouldn't change
+the *reasoning*, only the digits, it doesn't count.
 
-**Verification, not assertion**: `src/test_llm_grounded.py` calls the same
-machine with two different synthetic sensor readings and checks the output
-*wording* differs — not just the embedded numbers — by masking every
-numeric token before comparing. A same-input control call proves the
-difference is driven by the sensor picture, not sampling noise: across
-repeated runs, two different readings consistently score **lower** wording
-similarity (0.15–0.42 observed) than the same reading asked twice (0.43–0.63
-observed) — the test asserts that ordering, not a fixed number, since the
-LLM call is not deterministic. Escalation language ("inspect", "stop",
-"immediate") appears only in the erratic case; reassurance language only in
-the steady one, every run.
+So the way this actually works: for every explanation, the app builds a
+real snapshot of that machine's current numbers — not just the raw
+readings, but each one expressed as a ratio to that machine's own typical
+level (the same ratio the model itself uses to make its prediction) — and
+sends *only* that to the language model, live, at request time. The prompt
+tells it to name whichever reading is most unusual, using that ratio, to
+say plainly when nothing looks wrong instead of manufacturing concern to
+sound thorough, and to never just repeat a database field name back at the
+reader.
 
-### How Q&A retrieval works
+To prove this isn't a template in disguise, there's an actual test
+(`src/test_llm_grounded.py`) that calls the explanation function twice for
+the same machine with two different, made-up sensor readings, then checks
+whether the *wording* changed — not just the numbers embedded in it. To
+make sure that's a fair test and not just random noise (the language model
+isn't perfectly deterministic), I also ran the exact same input twice as a
+control. Across repeated runs, two genuinely different readings score
+noticeably lower on a wording-similarity check (roughly 0.15–0.42) than
+the same reading asked twice (roughly 0.43–0.63) — and every single run,
+the "something's wrong" language (inspect, stop, immediate) only shows up
+for the bad reading, and the "looks fine" language only shows up for the
+normal one.
 
-`src/llm_qa.py` is deliberately two stages:
+### How the free-text question box works
 
-1. **Retrieve** — the question is parsed with plain regex into filters —
-   machine ID, line, **risk band** ("high risk," "watchlist," "safe"),
-   **date** (both relative, "last 3 days," and absolute, "April 8th" or
-   "2026-04-08"), and "top N" — then real rows are pulled from the scored
-   dataset via `risk_context.query()`. No LLM call happens in this stage, so
-   it cannot hallucinate a filter. (An earlier version computed whether a
-   question was risk-related but never actually filtered by band before
-   handing evidence to the model — a real gap against the "filtered by
-   machine, date range, or risk level" requirement, caught in review and
-   fixed: band and absolute-date filters are now applied at retrieval, not
-   left for the LLM to sift out of the full fleet itself.)
-2. **Answer** — the retrieved rows (and only the retrieved rows) are handed
-   to the LLM with instructions to answer strictly from that evidence, say
-   plainly when something isn't in it, summarize a uniform result rather than
-   enumerating every machine, and never use markdown (the UI displays plain
-   text, so `**bold**` would show as literal asterisks).
+This one is deliberately split into two separate steps, because the
+tempting shortcut — just hand the whole question straight to the language
+model and let it improvise — is exactly how you get a system that
+confidently answers from general knowledge instead of the actual data.
 
-Asked *"Which machine has the highest oil pressure?"* — a column that
-doesn't exist in this dataset — the system responds that no oil-pressure
-reading is available rather than inventing one. Asked *"which machines are
-high risk right now?"* when none are, it says so in one sentence instead of
-dumping the full fleet list. Counts (e.g. "all 17 machines") are computed by
-code and handed to the model directly rather than left for it to count a
-list itself — an LLM miscounting a 17-item array is a real failure mode that
-was observed and fixed during review, not a hypothetical one. Every answer
-ships with the retrieved evidence attached, viewable in the UI ("show the
-records this used"), so a wrong answer can always be traced back to what was
+1. **Look up the real data first.** The question gets parsed with plain,
+   boring pattern-matching (not another AI call) to figure out what's being
+   asked: which machine, which production line, a risk level ("high risk,"
+   "on the watchlist," "safe"), a date (either something relative like
+   "last 3 days" or a specific one like "April 8th"), or a top-N request.
+   Whatever matches gets used to pull the actual rows out of the scored
+   dataset. Nothing gets invented at this stage — it either finds real
+   rows or it doesn't.
+2. **Then, and only then, answer from what was found.** The language model
+   gets exactly those retrieved rows and is told, explicitly, to answer
+   only from that evidence, to say plainly when something isn't in it
+   rather than guess, and to summarize when the answer is the same for
+   almost everyone rather than reciting all 17 machine IDs one by one.
+
+A couple of examples from actually testing this: asked "which machine has
+the highest oil pressure" — a sensor that doesn't exist in this dataset —
+it says so instead of inventing a plausible-sounding number. Asked "which
+machines are high risk right now" when none currently are, it says that in
+one sentence instead of dumping the entire fleet table and letting the
+reader figure it out. Every answer in the UI comes with a "show the records
+this used" toggle, so any answer can be checked against exactly what was
 retrieved.
 
-### The trend chart is walk-forward out-of-sample — deliberately not the shipped model
+One honest note on how this evolved: an earlier version of this code
+computed whether a question was "about risk" but never actually used that
+to filter anything — it just handed the model the whole fleet and hoped it
+would sort it out correctly on its own. That's a real gap I caught on
+review, not a hypothetical one, and it's fixed now: risk-level and specific
+dates are proper filters applied before anything reaches the model.
 
-The shipped model is refit on **all** established history, which is correct
-for scoring the *present* but would make the *historical* trend chart grade
-its own homework. `src/build_historical_scores.py` instead does a
-rolling-origin weekly refit: each week is scored only by a model trained on
-data strictly before it (minus the 24h embargo). Concretely, at one real
-moment the shipped model reports MCH-213 at **98.7%** risk; the honest
-walk-forward score for that same hour is **42.4%** — both true, answering
-different questions ("what do we know now, with hindsight" vs. "what would
-we have known then"). The trend chart always shows the latter.
+### Why the trend chart doesn't use the same score as everything else
 
-Coverage is 53.5% of history — nothing is scored before 2026-02-26, because
-earlier weeks' training windows contain fewer than two recorded failures and
-there was no model to speak of yet. Unscored hours are returned as an
-explicit gap (`status: "insufficient_history"`), never a flat line implying
-the model was quiet.
+This is a subtle point but an important one, so it's worth spelling out.
 
-## App
+The model that powers the dashboard right now is trained on *all* the
+history available. That's exactly what you want for scoring the present
+moment — use everything you know. But if you used that same
+all-the-history model to draw a chart of risk *over the past few months*,
+you'd be letting it grade its own homework: at any point in the past, it
+would already "know" what happened next, because that data was part of its
+training set. The chart would look better than the system actually is.
 
-- **Dashboard** — every machine ranked by current risk, colour-coded by
-  band. Visual weight follows severity: LOW rows carry no fill and an
-  outlined pill; HIGH rows get a red stripe, a tinted background, and a
-  filled pill — so the seventeen quiet machines don't compete for attention
-  with the one that matters.
-- **Drill-down** — sensor history (temperature and vibration on separate
-  charts, never a dual axis), the driver table with each reading's ratio to
-  that machine's own normal, a live "explain this risk" button, and the
-  walk-forward trend chart.
-- **Ask box** — free-text question, grounded answer, retrieved evidence
-  visible on request.
-- **Time control** — since the dataset's final hour has every machine at
-  LOW (the last recorded failure was 30 April 04:00), the dashboard includes
-  a jump-to-any-recorded-breakdown picker so the model can be seen doing its
-  actual job rather than always landing on an all-green fleet.
+So the trend chart, and the little sparkline you see in the fleet table,
+come from a completely separate process: a rolling weekly re-training,
+where each week is scored only by a model trained on data from *before*
+that week (plus a 24-hour buffer for the same reason as the labels
+above). It's slower to compute and it's not the model that's actually
+deployed, but it's honest — it shows what the system would genuinely have
+told you at each point in time, not what it can tell you now with the
+benefit of hindsight.
 
-Stack: **FastAPI** (backend, holds no modelling logic of its own — it
-imports `src/` unchanged) + **React/Vite/Recharts** (frontend). In
-production both are served from one origin by the same FastAPI process
-(`frontend/dist` mounted as static files), so there's no separate static
-site and no CORS in production.
+The difference isn't small. At one specific real moment, the always-know-
+everything model reports a 98.7% risk for machine MCH-213; the honest,
+knew-only-what-it-knew-then score for that exact same hour is 42.4%.
+Both numbers are correct — they're just answering different questions
+("what do we know now, looking back" versus "what would we genuinely have
+been told at the time"). The chart on the machine drill-down page always
+shows the second one, and the fleet activity summary described below is
+computed from it too, since a plant manager reviewing *history* should see
+an honest history, not a flattering one.
+
+One consequence of doing it this way: there isn't enough history at the
+very start of the dataset to train a meaningful model yet (you need at
+least a couple of real failures in the training window before a model is
+worth anything), so the trend chart's earliest stretch — a bit under half
+the total timeline — is left visibly blank rather than filled in with a
+guess. It's an honest gap, not a bug.
+
+Because both of these are legitimate but different evaluations, two
+different "how many did it catch" numbers show up in this project and
+they're *supposed* to differ: the model-selection comparison above (19 of
+19, using three specific held-out test windows chosen to compare
+candidates fairly) is a different exercise from the fleet activity summary
+you see when you open the app (14 of 14 *evaluable* breakdowns — the other
+3 recorded failures happened too early for the weekly walk-forward process
+to have built up enough history to score them yet). Neither number is
+wrong; they're just measuring slightly different things, and I've tried to
+be explicit about which is which wherever they show up.
+
+## The app itself
+
+- **A fleet dashboard** that ranks every machine by current risk and
+  color-codes it. I spent real effort making sure a quiet, healthy fleet
+  *looks* quiet — a machine that's fine gets a plain outlined label, not a
+  loud green badge competing for your attention with the one machine that
+  actually needs it.
+- **A "here's what actually happened" summary**, always visible the moment
+  you open the app. Because the very last stretch of real data happens to
+  be quiet (no failures in the final day or so), a dashboard that only ever
+  shows "right now" would make it look like the system doesn't do anything.
+  So there's a strip up top with real, computed numbers — how many
+  breakdowns are on record, how many of the ones the system could actually
+  evaluate did it catch, how much warning time that gave, and a one-click
+  jump to the moment of the most recent one.
+- **A tiny 30-day trend line right in the fleet table** for every machine,
+  so even a machine sitting at 0% risk right now still visibly shows you if
+  it had a rough patch three weeks ago.
+- **Filters** on the fleet table — by production line, by risk band, or
+  just show me the new machines — so you're not scrolling a flat list.
+- **A drill-down per machine**: sensor history (temperature and vibration
+  charted separately, deliberately never crammed onto one dual-axis chart,
+  since that's an easy way to make two unrelated trends look connected),
+  a table of what's actually driving the current score, a button that
+  triggers a real, live "explain this" call to the language model, and the
+  honest walk-forward trend chart described above.
+- **The question box**, described above.
+- **A way to look at any past moment**, not just "now" — including a
+  shortcut straight to any of the 17 recorded breakdowns, so you can watch
+  the system actually catch one instead of only ever seeing a calm fleet.
+- Both a dark and a light theme, matching whichever your system prefers by
+  default, with a manual override if you'd rather pick one yourself.
+
+Under the hood it's a **FastAPI** backend — which doesn't contain any of
+the modeling logic itself, it just calls into the same Python modules used
+for training and serves the results as JSON — and a **React** frontend
+(Vite + Recharts). In production, one process serves both the app and the
+API from the same address, so there's no separate static site to manage
+and no cross-origin request headaches to debug.
 
 ## How to run
 
-### Locally
+### On your own machine
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env        # fill in GROQ_API_KEY
+cp .env.example .env        # then paste in a real GROQ_API_KEY
 
-# one-time: build the model artifacts (already committed to the repo, but
-# reproducible from scratch)
+# these three build the model artifacts — they're already committed to the
+# repo so you don't strictly have to re-run them, but this is how you'd
+# rebuild everything from scratch if the data changed
 python src/train_final_model.py
 python src/build_current_scores.py
 python src/build_historical_scores.py
 
-# backend
+# start the API
 uvicorn backend.main:app --reload --port 8000
 
-# frontend (separate terminal)
+# in a second terminal, start the frontend
 cd frontend
 npm install
-npm run dev      # http://localhost:5173, proxies /api to :8000
+npm run dev      # opens on http://localhost:5173, talks to the API on :8000
 ```
 
-Or the production shape (single origin, no separate dev servers):
+If you'd rather run it the way it actually deploys — one process, one
+address, no separate dev servers — build the frontend once and let the API
+serve it:
 
 ```bash
 cd frontend && npm install && npm run build && cd ..
-uvicorn backend.main:app --port 8000    # serves the app AND the API at :8000
+uvicorn backend.main:app --port 8000    # now serves the whole app at :8000
 ```
 
-### Docker / Render
+### With Docker
 
 ```bash
 docker build -t predictive-maintenance .
 docker run -p 8000:8000 -e GROQ_API_KEY=your_key predictive-maintenance
 ```
 
-`render.yaml` deploys this as a single Docker web service — push to GitHub,
-then in Render choose **New → Blueprint** and point it at the repo.
-`GROQ_API_KEY` is requested by Render's dashboard at deploy time (marked
-`sync: false` in the blueprint), never committed to the repo.
+### Deploying it for real
 
-**Deployed URL**: not yet live — deployment is pending the Render service
-being created from this GitHub repository. The Dockerfile and render.yaml are
-prepared and their individual build stages verified.
+`render.yaml` in this repo describes a single Docker web service. Push
+this repository to GitHub, then in Render pick **New → Blueprint** and
+point it at the repo — Render reads the file and sets everything up.
+`GROQ_API_KEY` isn't in the repo (obviously); Render's dashboard asks for
+it at deploy time instead.
 
-### Reproducing every claim in this README and the model-selection doc
+**Live URL:** not deployed yet — this step is waiting on a Render service
+actually being created from the GitHub repo. Everything the deploy needs
+(Dockerfile, render.yaml) is written and each build step has been checked
+individually; I just haven't had a live Render instance to point it at.
+
+### If you want to check my work
+
+Every real finding and number in this README came from actually running
+something. Here's what produces each piece, in case you want to see it for
+yourself rather than take my word for it:
 
 ```bash
-python src/data_exploration.py       # Phase 0 findings
-python src/test_no_leakage.py        # causality guard over all 26 features
-python src/test_retrieval.py         # deterministic Q&A filter regression checks
-python src/train_baseline.py         # candidate comparison table
-python src/threshold_sweep.py        # threshold sweep
-python src/event_level_analysis.py   # event-level analysis + generalization check
-python src/test_llm_grounded.py      # groundedness verification (needs GROQ_API_KEY)
+python src/data_exploration.py       # the original data findings from Phase 0
+python src/test_no_leakage.py        # proves none of the 26 features can see the future
+python src/test_retrieval.py         # checks the question-box filters actually filter
+python src/train_baseline.py         # the full candidate comparison table
+python src/threshold_sweep.py        # how the 0.20 alert line was chosen
+python src/event_level_analysis.py   # the "how many breakdowns did it catch" numbers
+python src/test_llm_grounded.py      # proves the AI explanations aren't a template (needs GROQ_API_KEY)
 ```
 
-## Limitations & next steps
+## Limitations & what I'd do next
 
-- **Small sample.** 19 caught events over ~83 days of held-out testing is a
-  real result, not a guarantee — describe it as "caught every failure in
-  testing," never "never misses."
-- **~3 of 4 alerts are false** at the shipped threshold (row-level precision
-  0.402). Acceptable given the cost asymmetry, but the plant team should be
-  told this upfront so the expectation is set correctly from day one.
-- **Minimum warning time is 16 hours**, down from 22h in an earlier
-  configuration — a real, accepted trade for a 30% cut in false alarms
-  (documented in model_selection.md §10).
-- **Cold-start machines are unvalidated, not validated-good.** Their
-  event-level recall is literally unmeasurable with zero recorded failures.
-- **The trend chart covers 53.5% of history** by design — see above. A
-  finer-grained (e.g. daily) walk-forward refit could extend coverage
-  slightly but not past the first two failures in Feb 2026.
-- **10 duplicate `(machine_id, timestamp)` rows exist in the raw CSV**, all
-  on MCH-200, all exact duplicates (same readings, no failures involved).
-  They were not removed — doing so now would shift row counts already
-  reported throughout Phase 0–2 for a change too small to affect any
-  conclusion (MCH-200 gets 10 hours of harmless double weight in training).
-  Flagged here rather than silently fixed or silently ignored.
-- **Explanation caching** is per `(machine_id, as_of)` to avoid re-billing
-  Groq on UI re-renders — a cache miss always makes a live call, and it is
-  never precomputed. Bounded to 500 entries (simple FIFO eviction) so a
-  long-lived server process can't grow this without limit.
-- **LLM endpoints are rate-limited in-process** to protect the Groq budget from
-  refresh loops and casual abuse. The limit is per client IP and resets every
-  minute; a multi-instance deployment should move this policy to an edge or
-  shared store.
-- **Groq rate limits are real and were hit during testing** (8,000 tokens/min
-  on the on-demand tier used here). Back-to-back explanation or Q&A requests
-  can return a 429 from the provider. The backend never surfaces that raw
-  error to the UI — it logs the real cause server-side and returns a plain
-  "temporarily unavailable, try again shortly" message — but under
-  concurrent stakeholder usage this is a genuine capacity ceiling, not just
-  an edge case. A paid Groq tier or simple request queuing would remove it.
-- **If `GROQ_API_KEY` is missing or invalid, the app still boots and the
-  dashboard/trend chart work normally** — only "explain this risk" and the
-  ask box fail, with the same plain error message above. This is by design
-  (the risk model doesn't need an LLM to function) but is worth knowing
-  before assuming a blank explanation means the whole app is broken.
-- **A malformed or out-of-range `as_of` value returns a clear 400/404**
-  rather than a misleading error (an earlier version reported "no data for
-  machine X" when the actual problem was an unparseable timestamp — fixed).
-  A view-in-progress error no longer fails silently either: the last
-  successfully loaded data stays visible with a plain-language banner
-  explaining what didn't update.
-- **Next steps**: extend walk-forward coverage as more plant history
-  accumulates; revisit the missingness treatment (forward-fill, justified
-  today by ~99% of gaps being isolated single hours) if a future feed has
-  longer sensor outages. Leading gaps use fixed causal fallbacks rather than
-  future observations. Consider a small held-out validation set for the
-  two cold-start machines once they've run long enough to have failures of
-  their own; deploy and put a real Render URL here.
+Being upfront about what this doesn't do, or doesn't do perfectly:
 
-## Repository structure
+- **17 failures is a small number to learn from.** Catching every
+  evaluable breakdown in testing is a genuinely good result, but it's a
+  result from a small sample, not a guarantee. I've been careful to phrase
+  this as "caught everything we tested against," never "never misses."
+- **Roughly 3 out of every 4 alerts turn out to be false alarms** at the
+  threshold this is currently set to. That's an accepted trade-off given
+  how much worse a missed breakdown is than an unnecessary inspection, but
+  it's the kind of thing a plant team should be told up front, not
+  discover after the tenth false alarm.
+- **In the model-selection testing, the shortest warning time seen was 16
+  hours**, down from 22 in an earlier version of the model — a deliberate
+  trade for a 30% cut in false alarms overall, not a pure improvement (the
+  full before-and-after is in the model-selection doc). This is a different
+  number from the "23h minimum" you'll see in the live app's activity
+  summary — that one comes from the separate weekly walk-forward process
+  described above, evaluated over a different, longer stretch of history.
+  Both are real; they're just measuring two different things.
+- **The two new machines are unproven, not proven-safe.** There's
+  currently no way to check their scores against a real outcome, because
+  neither has a recorded failure yet.
+- **The trend chart only covers about half of the dataset's timeline**, on
+  purpose — the earliest stretch predates enough failures for the
+  walk-forward process to have anything to train on yet. A finer-grained
+  (say, daily instead of weekly) version of that process would push the
+  coverage back a little, but not past the first couple of real failures
+  in the data.
+- **There are 10 duplicate rows in the raw CSV** (same machine, same
+  timestamp, identical readings, all on MCH-200, none involving a
+  failure). I left them in rather than quietly dropping them — removing
+  them now would shift row counts that are already reported and discussed
+  earlier in this project for a change too small to affect any actual
+  conclusion. Better to flag it than to fix it silently.
+- **AI explanations are cached briefly** (per machine, per hour) so
+  clicking around the UI doesn't rack up unnecessary API calls — but a
+  cache miss always triggers a real, live call, and nothing is ever
+  pre-generated ahead of time.
+- **The AI-backed features are rate-limited** to protect against accidental
+  refresh loops or abuse burning through the API budget. That limit is
+  currently tracked per server process, so a future multi-instance
+  deployment would need to move it somewhere shared.
+- **Groq's rate limits are real, and I hit them while testing this** — the
+  free tier used here caps out at 8,000 tokens a minute, which a handful
+  of back-to-back requests can exceed. When that happens, the backend
+  never shows the raw provider error to the user; it logs the real cause
+  on the server and shows a plain "try again in a moment" message instead.
+  Under heavier concurrent use this would need a paid tier or a request
+  queue.
+- **If the Groq API key is missing or wrong, the app still works** — the
+  dashboard, the fleet table, the trend charts all keep functioning
+  normally, since none of that depends on the language model. Only the
+  "explain this" button and the question box would fail, with the same
+  plain error message mentioned above. Worth knowing so a missing key
+  doesn't get mistaken for the whole app being broken.
+- **Bad input is handled honestly rather than papered over.** An
+  unparseable date, for instance, returns a real error saying so, instead
+  of a misleading "no data found" message (an earlier version of this code
+  did exactly that, and it's fixed now). If a request to refresh the view
+  fails, the last good data stays on screen with a plain note explaining
+  what didn't update, rather than the screen silently going stale with no
+  explanation.
+- **Where I'd spend more time**: extending the honest walk-forward
+  coverage as more real plant data comes in; revisiting how missing sensor
+  readings are filled in if a future data feed has longer gaps than this
+  one does (right now that choice is justified by this dataset's gaps
+  being almost all single, isolated hours — a different data feed might
+  need a different answer); building a small held-out check for the two
+  new machines once they've been running long enough to have a failure of
+  their own to test against; and, obviously, actually deploying this to a
+  live Render URL and putting that link here.
+
+## Repository layout
 
 ```
-src/                     data prep, feature engineering, training, LLM logic
-  features.py              causal feature engineering + labelling
-  train_baseline.py        candidate model comparison (Phase 1)
-  train_final_model.py     fits and persists the shipped artifact
-  build_historical_scores.py   walk-forward OOS scores for the trend chart
-  build_current_scores.py      persisted current-state scores for fast API boot
-  risk_context.py          retrieval layer: scoring, snapshots, Q&A queries
-  llm_explain.py            live Groq explanation calls
-  llm_qa.py                 two-stage grounded Q&A
-  test_no_leakage.py        causality guard (must pass)
-  test_llm_grounded.py      groundedness verification (must pass)
-backend/main.py          FastAPI — imports src/ unchanged, shapes JSON
-frontend/                React app (Vite + Recharts)
-models/                  committed artifacts: trained model + current/OOS scores
-docs/model_selection.md  full model-selection record with every metric shown
-Dockerfile, render.yaml  deployment config
+src/                        data prep, feature engineering, training, AI logic
+  features.py                  causal feature engineering + labeling
+  train_baseline.py            candidate model comparison (Phase 1)
+  train_final_model.py         fits and saves the model that ships
+  build_historical_scores.py   the honest walk-forward scores behind the trend chart
+  build_current_scores.py      pre-computed "right now" scores, so the API boots fast
+  risk_context.py              scoring, snapshots, fleet activity summary, Q&A lookups
+  llm_explain.py                live Groq calls for the "explain this" feature
+  llm_qa.py                     the two-stage question box (look up, then answer)
+  test_no_leakage.py            proves no feature can see the future (must pass)
+  test_llm_grounded.py          proves explanations aren't a template (must pass)
+backend/main.py              FastAPI — no modeling logic of its own, just wiring
+frontend/                    the React app (Vite + Recharts)
+models/                      saved artifacts: the trained model + both score files
+docs/model_selection.md      the full model comparison, with every number shown
+Dockerfile, render.yaml      deployment config
 ```
