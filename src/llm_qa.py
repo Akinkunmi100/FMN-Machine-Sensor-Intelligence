@@ -179,7 +179,30 @@ def retrieve(scored: pd.DataFrame, question: str) -> dict:
     intent = parse_question(question, default_year=default_year)
     evidence = {"question_understood_as": intent}
 
-    fleet = fleet_snapshot(scored)
+    dataset_end = scored["timestamp"].max()
+    window_start = None
+    window_end_exclusive = None
+    if intent["date"]:
+        window_start = pd.Timestamp(intent["date"])
+        window_end_exclusive = window_start + pd.Timedelta(days=1)
+    elif intent["last_hours"]:
+        window_start = dataset_end - pd.Timedelta(hours=intent["last_hours"])
+
+    evidence["retrieval_window"] = {
+        "start": str(window_start) if window_start is not None else None,
+        "end_exclusive": (str(window_end_exclusive)
+                           if window_end_exclusive is not None else
+                           str(dataset_end + pd.Timedelta(microseconds=1))),
+    }
+
+    # A dated question should see the fleet as it existed at the end of that
+    # date. Current-state questions continue to use the latest fleet snapshot.
+    fleet_source = scored
+    if window_end_exclusive is not None:
+        fleet_source = scored[scored["timestamp"] < window_end_exclusive]
+    fleet = fleet_snapshot(fleet_source) if not fleet_source.empty else []
+    if intent["machines"]:
+        fleet = [m for m in fleet if m["machine_id"] in intent["machines"]]
     if intent["line"]:
         fleet = [m for m in fleet if m["line"] == intent["line"]]
     if intent["band"]:
@@ -192,7 +215,8 @@ def retrieve(scored: pd.DataFrame, question: str) -> dict:
     evidence["fleet_count"] = len(evidence["fleet_latest_ranked_by_risk"])
     if intent["band"] and not fleet:
         evidence["note"] = f"No machines are currently in the {intent['band']} band."
-    evidence["as_of"] = str(scored["timestamp"].max())
+    evidence["as_of"] = (str(fleet_source["timestamp"].max())
+                          if not fleet_source.empty else None)
     evidence["risk_bands"] = RISK_BANDS
 
     # A specific calendar day was named — pull that day's readings directly,
@@ -200,8 +224,10 @@ def retrieve(scored: pd.DataFrame, question: str) -> dict:
     if intent["date"]:
         day = pd.Timestamp(intent["date"])
         rows = query(scored, machines=intent["machines"] or None,
-                     line=intent["line"], start=day, end=day + pd.Timedelta(days=1),
+                     line=intent["line"], band=intent["band"], start=day,
+                     end_exclusive=day + pd.Timedelta(days=1),
                      limit=200)
+        evidence["readings_on_date_count"] = len(rows)
         if rows.empty:
             evidence["readings_on_date"] = []
             evidence["note_on_date"] = (
@@ -233,7 +259,9 @@ def retrieve(scored: pd.DataFrame, question: str) -> dict:
     # Recent readings when a time span was named.
     if intent["last_hours"]:
         rows = query(scored, machines=intent["machines"] or None,
-                     line=intent["line"], last_hours=intent["last_hours"], limit=200)
+                     line=intent["line"], band=intent["band"],
+                     last_hours=intent["last_hours"], limit=200)
+        evidence["recent_readings_count"] = len(rows)
         evidence["recent_readings_sample"] = [
             {
                 "machine_id": r["machine_id"], "timestamp": str(r["timestamp"]),
@@ -251,6 +279,10 @@ def retrieve(scored: pd.DataFrame, question: str) -> dict:
             fails = fails[fails["machine_id"].isin(intent["machines"])]
         if intent["line"]:
             fails = fails[fails["line"] == intent["line"]]
+        if window_start is not None:
+            fails = fails[fails["timestamp"] >= window_start]
+        if window_end_exclusive is not None:
+            fails = fails[fails["timestamp"] < window_end_exclusive]
         evidence["recorded_failure_events"] = [
             {"machine_id": r["machine_id"], "line": r["line"],
              "timestamp": str(r["timestamp"])}
@@ -264,6 +296,10 @@ def retrieve(scored: pd.DataFrame, question: str) -> dict:
             resets = resets[resets["machine_id"].isin(intent["machines"])]
         if intent["line"]:
             resets = resets[resets["line"] == intent["line"]]
+        if window_start is not None:
+            resets = resets[resets["timestamp"] >= window_start]
+        if window_end_exclusive is not None:
+            resets = resets[resets["timestamp"] < window_end_exclusive]
         evidence["maintenance_resets"] = [
             {"machine_id": r["machine_id"], "timestamp": str(r["timestamp"])}
             for _, r in resets.sort_values("timestamp").iterrows()

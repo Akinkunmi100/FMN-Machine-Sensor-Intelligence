@@ -246,6 +246,7 @@ cp .env.example .env        # fill in GROQ_API_KEY
 # one-time: build the model artifacts (already committed to the repo, but
 # reproducible from scratch)
 python src/train_final_model.py
+python src/build_current_scores.py
 python src/build_historical_scores.py
 
 # backend
@@ -276,15 +277,16 @@ then in Render choose **New → Blueprint** and point it at the repo.
 `GROQ_API_KEY` is requested by Render's dashboard at deploy time (marked
 `sync: false` in the blueprint), never committed to the repo.
 
-**Deployed URL**: not yet live — deployment is pending a GitHub remote for
-this repo. The Dockerfile and render.yaml are prepared and their individual
-build stages verified (see Limitations).
+**Deployed URL**: not yet live — deployment is pending the Render service
+being created from this GitHub repository. The Dockerfile and render.yaml are
+prepared and their individual build stages verified.
 
 ### Reproducing every claim in this README and the model-selection doc
 
 ```bash
 python src/data_exploration.py       # Phase 0 findings
 python src/test_no_leakage.py        # causality guard over all 26 features
+python src/test_retrieval.py         # deterministic Q&A filter regression checks
 python src/train_baseline.py         # candidate comparison table
 python src/threshold_sweep.py        # threshold sweep
 python src/event_level_analysis.py   # event-level analysis + generalization check
@@ -317,6 +319,10 @@ python src/test_llm_grounded.py      # groundedness verification (needs GROQ_API
   Groq on UI re-renders — a cache miss always makes a live call, and it is
   never precomputed. Bounded to 500 entries (simple FIFO eviction) so a
   long-lived server process can't grow this without limit.
+- **LLM endpoints are rate-limited in-process** to protect the Groq budget from
+  refresh loops and casual abuse. The limit is per client IP and resets every
+  minute; a multi-instance deployment should move this policy to an edge or
+  shared store.
 - **Groq rate limits are real and were hit during testing** (8,000 tokens/min
   on the on-demand tier used here). Back-to-back explanation or Q&A requests
   can return a 429 from the provider. The backend never surfaces that raw
@@ -338,7 +344,8 @@ python src/test_llm_grounded.py      # groundedness verification (needs GROQ_API
 - **Next steps**: extend walk-forward coverage as more plant history
   accumulates; revisit the missingness treatment (forward-fill, justified
   today by ~99% of gaps being isolated single hours) if a future feed has
-  longer sensor outages; consider a small held-out validation set for the
+  longer sensor outages. Leading gaps use fixed causal fallbacks rather than
+  future observations. Consider a small held-out validation set for the
   two cold-start machines once they've run long enough to have failures of
   their own; deploy and put a real Render URL here.
 
@@ -350,6 +357,7 @@ src/                     data prep, feature engineering, training, LLM logic
   train_baseline.py        candidate model comparison (Phase 1)
   train_final_model.py     fits and persists the shipped artifact
   build_historical_scores.py   walk-forward OOS scores for the trend chart
+  build_current_scores.py      persisted current-state scores for fast API boot
   risk_context.py          retrieval layer: scoring, snapshots, Q&A queries
   llm_explain.py            live Groq explanation calls
   llm_qa.py                 two-stage grounded Q&A
@@ -357,7 +365,7 @@ src/                     data prep, feature engineering, training, LLM logic
   test_llm_grounded.py      groundedness verification (must pass)
 backend/main.py          FastAPI — imports src/ unchanged, shapes JSON
 frontend/                React app (Vite + Recharts)
-models/                  committed artifacts: trained model + walk-forward scores
+models/                  committed artifacts: trained model + current/OOS scores
 docs/model_selection.md  full model-selection record with every metric shown
 Dockerfile, render.yaml  deployment config
 ```

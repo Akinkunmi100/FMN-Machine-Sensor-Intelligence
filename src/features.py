@@ -17,6 +17,16 @@ NEW_MACHINES = ["MCH-300", "MCH-301"]
 
 SENSOR_COLUMNS = ["temperature_c", "vibration_mm_s"]
 
+# Fixed, domain-plausible fallbacks for a leading missing value. These are
+# deliberately constants rather than medians calculated from the input frame:
+# using a later observation to fill an earlier missing value would violate the
+# strict-causality contract of this module. The current dataset has no leading
+# sensor gaps, but keeping this path causal matters when new data is supplied.
+SENSOR_FALLBACKS = {
+    "temperature_c": 60.0,
+    "vibration_mm_s": 0.8,
+}
+
 # Rolling features that also get a per-machine RELATIVE counterpart. An
 # absolute reading only means something against that machine's own normal:
 # a machine that always runs rough would be flagged forever on absolute
@@ -69,11 +79,16 @@ def load_data(csv_path: str) -> pd.DataFrame:
 
 def impute_sensors(df: pd.DataFrame) -> pd.DataFrame:
     """Per-machine forward-fill, matching Phase 0's finding that ~99% of
-    gaps are isolated single-hour points. bfill only covers a leading NaN
-    at the very start of a machine's series (ffill can't reach it)."""
+    gaps are isolated single-hour points. Any leading NaN is replaced with a
+    fixed domain fallback rather than a future observation, so imputation is
+    causal even when a new machine starts with missing sensor data."""
     df = df.copy()
     for col in SENSOR_COLUMNS:
-        df[col] = df.groupby("machine_id")[col].transform(lambda s: s.ffill().bfill())
+        df[col] = (
+            df.groupby("machine_id")[col]
+            .transform("ffill")
+            .fillna(SENSOR_FALLBACKS[col])
+        )
     return df
 
 

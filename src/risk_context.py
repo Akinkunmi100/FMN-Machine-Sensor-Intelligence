@@ -25,9 +25,11 @@ from features import (
     load_data,
 )
 
-CSV_PATH = "project2_manufacturing_sensors.csv"
-MODEL_PATH = Path("models/failure_risk_rf.joblib")
-METADATA_PATH = Path("models/failure_risk_rf.meta.json")
+ROOT = Path(__file__).resolve().parent.parent
+CSV_PATH = str(ROOT / "project2_manufacturing_sensors.csv")
+MODEL_PATH = ROOT / "models" / "failure_risk_rf.joblib"
+METADATA_PATH = ROOT / "models" / "failure_risk_rf.meta.json"
+CURRENT_SCORES_PATH = ROOT / "models" / "current_scores.parquet"
 
 # HIGH is the validated operating point from Phase 2: 0.20 caught 19/19
 # breakdowns across every held-out window.
@@ -83,8 +85,30 @@ def load_model():
     return joblib.load(MODEL_PATH), meta
 
 
-def score_frame(df: pd.DataFrame = None, csv_path: str = CSV_PATH) -> pd.DataFrame:
-    """Adds a `risk` column (P(failure within 24h)) and a `risk_band`."""
+def _scores_artifact_is_fresh(csv_path: str) -> bool:
+    """Return whether the persisted score frame matches the source inputs."""
+    if Path(csv_path).resolve() != Path(CSV_PATH).resolve():
+        return False
+    if not CURRENT_SCORES_PATH.exists():
+        return False
+    source_mtime = Path(csv_path).stat().st_mtime
+    newest_model_input = max(MODEL_PATH.stat().st_mtime,
+                             METADATA_PATH.stat().st_mtime)
+    return CURRENT_SCORES_PATH.stat().st_mtime >= max(source_mtime,
+                                                     newest_model_input)
+
+
+def score_frame(df: pd.DataFrame = None, csv_path: str = CSV_PATH,
+                use_cached: bool = True) -> pd.DataFrame:
+    """Adds a `risk` column (P(failure within 24h)) and a `risk_band`.
+
+    The application uses a committed, source-checked score artifact so boot
+    does not rebuild 43k rows of rolling features on every restart. Training
+    and data changes automatically invalidate it; ``use_cached=False`` is
+    used by the artifact build script.
+    """
+    if df is None and use_cached and _scores_artifact_is_fresh(csv_path):
+        return pd.read_parquet(CURRENT_SCORES_PATH)
     if df is None:
         df = build_scoring_frame(csv_path)
     model, _ = load_model()
@@ -184,7 +208,8 @@ def fleet_snapshot(scored: pd.DataFrame) -> list:
 
 
 def query(scored: pd.DataFrame, machines=None, line=None, band=None,
-          start=None, end=None, last_hours=None, limit=400) -> pd.DataFrame:
+          start=None, end=None, end_exclusive=None, last_hours=None,
+          limit=400) -> pd.DataFrame:
     """Deterministic filtered retrieval — the evidence step for Q&A."""
     out = scored
     if machines:
@@ -198,6 +223,8 @@ def query(scored: pd.DataFrame, machines=None, line=None, band=None,
         out = out[out["timestamp"] >= cutoff]
     if start:
         out = out[out["timestamp"] >= pd.Timestamp(start)]
+    if end_exclusive:
+        out = out[out["timestamp"] < pd.Timestamp(end_exclusive)]
     if end:
         out = out[out["timestamp"] <= pd.Timestamp(end)]
     return out.sort_values("timestamp").tail(limit)

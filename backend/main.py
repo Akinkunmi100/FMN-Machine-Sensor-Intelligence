@@ -18,6 +18,8 @@ Run locally:  uvicorn backend.main:app --reload --port 8000
 """
 
 import sys
+import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -25,11 +27,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 import pandas as pd  # noqa: E402
-from fastapi import FastAPI, HTTPException, Query  # noqa: E402
+from fastapi import FastAPI, HTTPException, Query, Request  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
-from pydantic import BaseModel  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
 
 import llm_explain  # noqa: E402
 import llm_qa  # noqa: E402
@@ -51,6 +53,25 @@ STATE: dict = {}
 # switches don't re-bill Groq. A miss always makes a live call, and a different
 # snapshot is a different key — caching is not precomputation.
 EXPLANATION_CACHE: dict = {}
+
+# The two LLM-backed routes are deliberately bounded in-process. This is a
+# lightweight safeguard for the single-instance Render deployment: it limits
+# accidental refresh loops and casual API abuse without adding a dependency.
+RATE_WINDOW_SECONDS = 60.0
+RATE_LIMITS = {"explain": 30, "qa": 20}
+RATE_BUCKETS: dict[tuple[str, str], deque] = defaultdict(deque)
+
+
+def enforce_rate_limit(request: Request, route: str) -> None:
+    now = time.monotonic()
+    client = request.client.host if request.client else "unknown"
+    bucket = RATE_BUCKETS[(route, client)]
+    cutoff = now - RATE_WINDOW_SECONDS
+    while bucket and bucket[0] <= cutoff:
+        bucket.popleft()
+    if len(bucket) >= RATE_LIMITS[route]:
+        raise HTTPException(429, "Too many requests. Try again shortly.")
+    bucket.append(now)
 
 
 @asynccontextmanager
@@ -236,7 +257,9 @@ def _cache_explanation(key, result):
 
 
 @app.post("/api/machines/{machine_id}/explain")
-def explain(machine_id: str, as_of: str | None = Query(None)):
+def explain(request: Request, machine_id: str,
+            as_of: str | None = Query(None)):
+    enforce_rate_limit(request, "explain")
     scored = scored_frame()
     at = parse_as_of(as_of)
     try:
@@ -268,11 +291,12 @@ def explain(machine_id: str, as_of: str | None = Query(None)):
 
 
 class Question(BaseModel):
-    question: str
+    question: str = Field(min_length=1, max_length=1000)
 
 
 @app.post("/api/qa")
-def qa(payload: Question):
+def qa(request: Request, payload: Question):
+    enforce_rate_limit(request, "qa")
     q = payload.question.strip()
     if not q:
         raise HTTPException(400, "question is empty")
