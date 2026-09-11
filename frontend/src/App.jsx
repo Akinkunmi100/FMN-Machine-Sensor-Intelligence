@@ -6,6 +6,7 @@ import AskBox from "./components/AskBox.jsx";
 import TimeControl from "./components/TimeControl.jsx";
 import ActivityStrip from "./components/ActivityStrip.jsx";
 import ThemeToggle from "./components/ThemeToggle.jsx";
+import { formatTimestamp } from "./format.js";
 
 export default function App() {
   const [meta, setMeta] = useState(null);
@@ -39,11 +40,11 @@ export default function App() {
     return (
       <div className="app">
         <div className="error-page">
-          <h1>Can’t reach the risk service</h1>
-          <p className="mono">{error}</p>
+          <h1>Plant data is unavailable</h1>
+          <p>We couldn’t connect to the risk service, so the dashboard cannot load yet.</p>
           <p>
-            Start the backend with{" "}
-            <code>uvicorn backend.main:app --port 8000</code>, then reload.
+            Try refreshing the page. If the problem continues, ask the technical
+            team to check the risk service.
           </p>
         </div>
       </div>
@@ -94,12 +95,20 @@ export default function App() {
           silently freezes with no indication anything went wrong. */}
       {error && fleet && (
         <div className="note warn" role="alert" style={{ marginTop: 14 }}>
-          Couldn’t update the view: {error}. Showing the last data that
-          loaded successfully ({fleet.as_of}).
+          We couldn’t update the view. Showing the last data that loaded
+          successfully ({formatTimestamp(fleet.as_of)}). Try again shortly.
         </div>
       )}
 
-      {meta && <ActivityStrip meta={meta} onJumpTo={setAsOf} />}
+      {meta && (
+        <ActivityStrip
+          meta={meta}
+          onJumpTo={(timestamp) => {
+            setAsOf(timestamp);
+            setSelected(null);
+          }}
+        />
+      )}
 
       {meta && <AskBox />}
 

@@ -25,18 +25,24 @@ to them. Their rows land in the final weeks and do get genuine out-of-sample
 scores — but with under 24h of prior history their relative features sit at the
 1.0 fallback, so those scores lean on absolute features. Flagged, not fixed.
 
-Run:  python src/build_historical_scores.py
+Run:  python -m src.build_historical_scores
 Out:  models/historical_scores_oos.parquet
 """
 
 import sys
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 
-from features import (
+from .config import (
+    ALERT_THRESHOLD,
+    DATA_PATH,
+    HISTORICAL_SCORES_PATH,
+    MODEL_PARAMS,
+    PREDICTION_HORIZON_HOURS,
+)
+from .features import (
     FEATURE_COLUMNS,
     NEW_MACHINES,
     build_dataset,
@@ -44,10 +50,9 @@ from features import (
     impute_sensors,
     load_data,
 )
-from train_final_model import ALERT_THRESHOLD, HORIZON_HOURS, MODEL_PARAMS
-
-CSV_PATH = "project2_manufacturing_sensors.csv"
-OUT_PATH = Path("models/historical_scores_oos.parquet")
+HORIZON_HOURS = PREDICTION_HORIZON_HOURS
+CSV_PATH = str(DATA_PATH)
+OUT_PATH = HISTORICAL_SCORES_PATH
 
 MIN_TRAIN_EVENTS = 2   # a model trained on 0-1 failures has nothing to learn
 WEEK = pd.Timedelta(days=7)

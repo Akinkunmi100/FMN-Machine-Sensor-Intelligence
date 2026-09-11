@@ -3,16 +3,18 @@ Phase 0 — Data Exploration for project2_manufacturing_sensors.csv
 
 Reports real findings only: missingness, class balance, cold-start sparsity
 for the 2 new machines, and maintenance-reset behavior. No imputation, no
-feature engineering, no modeling happens here — see CLAUDE.md Build Phases.
+feature engineering, no modeling happens here.
 """
 
 import sys
 
 import pandas as pd
 
+from .config import DATA_PATH
+
 sys.stdout.reconfigure(encoding="utf-8")
 
-CSV_PATH = "project2_manufacturing_sensors.csv"
+CSV_PATH = str(DATA_PATH)
 pd.set_option("display.width", 160)
 pd.set_option("display.max_rows", 30)
 pd.set_option("display.max_columns", 20)

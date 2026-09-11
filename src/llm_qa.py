@@ -19,8 +19,8 @@ import re
 import pandas as pd
 from dotenv import load_dotenv
 
-from llm_explain import MAX_TOKENS, REASONING_EFFORT, _clean, get_client
-from risk_context import (
+from .llm_explain import MAX_TOKENS, REASONING_EFFORT, _clean, get_client
+from .risk_context import (
     RISK_BANDS,
     fleet_snapshot,
     machine_snapshot,
@@ -84,8 +84,8 @@ LINE_RE = re.compile(r"\bline\s+([abc])\b", re.I)
 LAST_N_RE = re.compile(r"\blast\s+(\d+)\s*(hour|hours|day|days|week|weeks)\b", re.I)
 TOP_N_RE = re.compile(r"\btop\s+(\d+)\b", re.I)
 
-# CLAUDE.md requires Q&A retrieval to filter by "machine, date range, or risk
-# level." Machine and relative date range were covered; band and absolute
+# Q&A retrieval filters by machine, date range, or risk level.
+# Machine and relative date range were covered; band and absolute
 # date were not — parse_question() previously computed `wants_risk` but never
 # turned it into an actual band filter, so "show me the high-risk machines"
 # was answered by handing the LLM the entire 17-machine fleet and trusting it

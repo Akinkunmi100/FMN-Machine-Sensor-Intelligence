@@ -8,8 +8,12 @@ already in the Phase 1 comparison — same fit, just scored at more cutoffs.
 import pandas as pd
 from sklearn.metrics import confusion_matrix
 
-from features import build_dataset
-from train_baseline import CSV_PATH, HORIZON_HOURS, build_models, fit_predict, make_splits
+from .config import DATA_PATH, PREDICTION_HORIZON_HOURS
+from .features import build_dataset
+from .train_baseline import build_models, fit_predict, make_splits
+
+CSV_PATH = str(DATA_PATH)
+HORIZON_HOURS = PREDICTION_HORIZON_HOURS
 
 THRESHOLDS = [0.5, 0.3, 0.2]
 MODELS_TO_SWEEP = [

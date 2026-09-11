@@ -12,12 +12,19 @@ snapshots carry cold_start=True so downstream text can flag lower confidence.
 
 import json
 from pathlib import Path
-
 import joblib
 import numpy as np
 import pandas as pd
 
-from features import (
+from .config import (
+    CURRENT_SCORES_PATH,
+    DATA_PATH,
+    HISTORICAL_SCORES_PATH,
+    METADATA_PATH,
+    MODEL_PATH,
+    RISK_BANDS,
+)
+from .features import (
     FEATURE_COLUMNS,
     NEW_MACHINES,
     engineer_features,
@@ -25,22 +32,8 @@ from features import (
     load_data,
 )
 
-ROOT = Path(__file__).resolve().parent.parent
-CSV_PATH = str(ROOT / "project2_manufacturing_sensors.csv")
-MODEL_PATH = ROOT / "models" / "failure_risk_rf.joblib"
-METADATA_PATH = ROOT / "models" / "failure_risk_rf.meta.json"
-CURRENT_SCORES_PATH = ROOT / "models" / "current_scores.parquet"
-
-# HIGH is the validated operating point from Phase 2: 0.20 caught 19/19
-# breakdowns across every held-out window.
-#
-# MEDIUM ("watch") is 0.02, signed off after seeing the score distribution.
-# The model is bimodal — 92.95% of machine-hours score exactly 0.0000 and the
-# 97th percentile is already 0.1367 — so a middle band is thin wherever it is
-# cut. 0.02 was chosen over a rounder 0.10 because it is the widest useful
-# watch tier (1.14% of hours vs 0.33%), and anything above it already sits in
-# the top 5% of all hours for that fleet.
-RISK_BANDS = {"high": 0.20, "medium": 0.02}
+CSV_PATH = str(DATA_PATH)
+OOS_PATH = HISTORICAL_SCORES_PATH
 
 # Drivers worth reporting, ordered by the fitted model's combined importance
 # (absolute + relative counterpart). See docs/model_selection.md §9.
@@ -79,7 +72,7 @@ def build_scoring_frame(csv_path: str = CSV_PATH) -> pd.DataFrame:
 def load_model():
     if not MODEL_PATH.exists():
         raise FileNotFoundError(
-            f"{MODEL_PATH} not found — run `python src/train_final_model.py` first."
+            f"{MODEL_PATH} not found — run `python -m src.train_final_model` first."
         )
     meta = json.loads(METADATA_PATH.read_text(encoding="utf-8"))
     return joblib.load(MODEL_PATH), meta

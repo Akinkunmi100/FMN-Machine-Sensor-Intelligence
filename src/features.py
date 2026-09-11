@@ -13,7 +13,9 @@ would leak the label almost directly.
 import numpy as np
 import pandas as pd
 
-NEW_MACHINES = ["MCH-300", "MCH-301"]
+from .config import COLD_START_MACHINES, DATA_PATH, PREDICTION_HORIZON_HOURS
+
+NEW_MACHINES = list(COLD_START_MACHINES)
 
 SENSOR_COLUMNS = ["temperature_c", "vibration_mm_s"]
 
@@ -63,23 +65,31 @@ FEATURE_COLUMNS = [
 
 
 def load_data(csv_path: str) -> pd.DataFrame:
+    """Load and sort raw sensor data by machine and plant time."""
     df = pd.read_csv(csv_path, parse_dates=["timestamp"])
     return df.sort_values(["machine_id", "timestamp"]).reset_index(drop=True)
 
 
 def impute_sensors(df: pd.DataFrame) -> pd.DataFrame:
-    """Per-machine forward-fill, matching Phase 0's finding that ~99% of
-    gaps are isolated single-hour points. A leading NaN (no prior reading to
-    forward-fill from) is backward-filled from that machine's own next real
-    reading — this dataset has zero leading gaps (verified: every machine's
-    first recorded hour is non-null), so bfill never actually fires here; it
-    exists only so a future machine that starts with a missing first hour is
-    filled from its own real data rather than a guessed constant. A fixed
-    fallback value was considered and rejected: 60.0C / 0.8mm/s would be an
-    arbitrary number with no basis in what that specific machine reports."""
+    """Fill isolated sensor gaps using only readings already observed.
+
+    Leading gaps remain invalid because filling them from a later reading
+    would leak future information into a production score.
+    """
     df = df.copy()
     for col in SENSOR_COLUMNS:
-        df[col] = df.groupby("machine_id")[col].transform(lambda s: s.ffill().bfill())
+        df[col] = df.groupby("machine_id")[col].transform("ffill")
+        leading_missing = df[col].isna()
+        if leading_missing.any():
+            example_columns = ["machine_id"]
+            if "timestamp" in df.columns:
+                example_columns.append("timestamp")
+            examples = df.loc[leading_missing, example_columns].head(3)
+            raise ValueError(
+                f"{col} has leading missing values with no prior reading. "
+                "Provide a baseline or remove those rows; future values must "
+                f"not be used for imputation. Examples: {examples.to_dict('records')}"
+            )
     return df
 
 
@@ -106,7 +116,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
         # Per-machine relative features: each rolling statistic divided by the
         # expanding median of that machine's OWN prior rows. shift(1) excludes
         # the current row, and `expanding` only ever looks backwards, so this
-        # stays strictly causal — enforced by src/test_no_leakage.py.
+        # stays strictly causal.
         for col in RELATIVE_BASE_COLUMNS:
             baseline = (
                 g[col].shift(1).expanding(min_periods=RELATIVE_MIN_PERIODS).median()
@@ -157,7 +167,8 @@ def build_labels(df: pd.DataFrame, horizon_hours: int = 24) -> pd.DataFrame:
     return df[~df["censored"]].drop(columns=["censored"]).reset_index(drop=True)
 
 
-def build_dataset(csv_path: str, horizon_hours: int = 24):
+def build_dataset(csv_path: str = str(DATA_PATH),
+                  horizon_hours: int = PREDICTION_HORIZON_HOURS):
     """Full pipeline for established machines only. Returns (df, feature_cols)."""
     raw = load_data(csv_path)
     established = raw[~raw["machine_id"].isin(NEW_MACHINES)].reset_index(drop=True)

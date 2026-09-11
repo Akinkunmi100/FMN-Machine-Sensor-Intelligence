@@ -15,9 +15,12 @@ This is the view the final model choice should be made on.
 import numpy as np
 import pandas as pd
 
-from features import NEW_MACHINES, load_data
-from train_baseline import CSV_PATH, HORIZON_HOURS, build_models, fit_predict, make_splits
-from features import build_dataset
+from .config import DATA_PATH, PREDICTION_HORIZON_HOURS
+from .features import NEW_MACHINES, build_dataset, load_data
+from .train_baseline import build_models, fit_predict, make_splits
+
+CSV_PATH = str(DATA_PATH)
+HORIZON_HOURS = PREDICTION_HORIZON_HOURS
 
 SWEEP = {
     "Random Forest (balanced, leaf=20) [SHIPPED]": [0.5, 0.3, 0.2],

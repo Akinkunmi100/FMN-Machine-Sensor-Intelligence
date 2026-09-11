@@ -4,6 +4,8 @@
 // a first-time visitor sees an all-green table and has no way to tell the
 // tool does anything at all.
 //
+import { formatTimestamp } from "../format.js";
+
 // Every number here comes from backend/main.py's /api/meta, which computes
 // it live at startup from the committed walk-forward artifact (see
 // risk_context.fleet_activity_summary) — nothing in this component is a
@@ -17,13 +19,14 @@ export default function ActivityStrip({ meta, onJumpTo }) {
   const uncovered = a.total_recorded_failures - a.evaluable_in_walk_forward;
 
   return (
-    <section className="activity" aria-label="Historical model performance">
+    <section className="activity" aria-labelledby="activity-heading">
+      <h2 id="activity-heading" className="sr-only">What the model has demonstrated</h2>
       <div className="activity-cell">
         <span className="activity-v">{a.total_recorded_failures}</span>
-        <span className="activity-l">RECORDED BREAKDOWNS ON FILE</span>
+        <span className="activity-l">Recorded breakdowns</span>
         {recent && (
           <span className="activity-sub">
-            Most recent: {recent.machine_id} · {recent.timestamp.slice(0, 16)}
+            {recent.machine_id} was most recently recorded on {formatTimestamp(recent.timestamp)}
           </span>
         )}
       </div>
@@ -32,11 +35,11 @@ export default function ActivityStrip({ meta, onJumpTo }) {
         <span className="activity-v">
           {a.caught_in_walk_forward}/{a.evaluable_in_walk_forward}
         </span>
-        <span className="activity-l">CAUGHT, EVALUATED HONESTLY</span>
+        <span className="activity-l">Caught in honest testing</span>
         <span className="activity-sub">
-          Scored only by what the model could have known at the time
+          Breakdown windows where the model gave an alert using only earlier data
           {uncovered > 0 &&
-            ` — ${uncovered} earlier breakdown${uncovered === 1 ? "" : "s"} predate enough history to score`}
+            ` — ${uncovered} earlier breakdown${uncovered === 1 ? "" : "s"} did not have enough earlier history to evaluate`}
         </span>
       </div>
 
@@ -44,10 +47,10 @@ export default function ActivityStrip({ meta, onJumpTo }) {
         <span className="activity-v">
           {a.median_lead_hours != null ? `${a.median_lead_hours}h` : "—"}
         </span>
-        <span className="activity-l">MEDIAN WARNING TIME</span>
+        <span className="activity-l">Typical warning time</span>
         <span className="activity-sub">
           {a.min_lead_hours != null
-            ? `As little as ${a.min_lead_hours}h in the tightest case`
+            ? `The shortest warning was ${a.min_lead_hours}h`
             : "Before the breakdown occurred"}
         </span>
       </div>
@@ -59,10 +62,10 @@ export default function ActivityStrip({ meta, onJumpTo }) {
             style={{ fontSize: "0.82rem" }}
             onClick={() => onJumpTo(recent.timestamp)}
           >
-            View the fleet at the last breakdown →
+            Review the last breakdown →
           </button>
           <span className="activity-sub">
-            {recent.machine_id} on {recent.line}, {recent.timestamp.slice(0, 16)}
+            View the fleet as it looked at {formatTimestamp(recent.timestamp)}
           </span>
         </div>
       )}

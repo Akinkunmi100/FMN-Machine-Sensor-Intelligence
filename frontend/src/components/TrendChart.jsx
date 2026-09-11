@@ -9,6 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { formatThreshold } from "../format.js";
 
 // WALK-FORWARD OUT-OF-SAMPLE risk: each week scored by a model trained only on
 // earlier data. Deliberately not the shipped model, which was refit on all
@@ -99,11 +100,11 @@ export default function TrendChart({ trend, meta }) {
       <div className="chart-legend">
         <span className="legend-item">
           <span className="legend-swatch" style={{ background: "var(--series-1)" }} />
-          Out-of-sample risk
+          Historical risk estimate
         </span>
         <span className="legend-item">
           <span className="legend-swatch dashed" style={{ borderTopColor: "var(--sev-high)" }} />
-          Alert threshold ({threshold})
+          High-risk threshold ({formatThreshold(threshold)})
         </span>
         {trend.failures.length > 0 && (
           <span className="legend-item">

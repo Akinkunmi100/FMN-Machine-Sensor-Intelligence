@@ -18,10 +18,11 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeClassifier
 from xgboost import XGBClassifier
 
-from features import build_dataset
+from .config import DATA_PATH, PREDICTION_HORIZON_HOURS
+from .features import build_dataset
 
-CSV_PATH = "project2_manufacturing_sensors.csv"
-HORIZON_HOURS = 24
+CSV_PATH = str(DATA_PATH)
+HORIZON_HOURS = PREDICTION_HORIZON_HOURS
 THRESHOLD = 0.5
 
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api.js";
 import TrendChart from "./TrendChart.jsx";
 import SensorChart from "./SensorChart.jsx";
+import { formatTimestamp } from "../format.js";
 
 export default function MachineDetail({ machineId, asOf, meta }) {
   const [snap, setSnap] = useState(null);
@@ -10,6 +11,7 @@ export default function MachineDetail({ machineId, asOf, meta }) {
   const [explaining, setExplaining] = useState(false);
   const [error, setError] = useState(null);
   const [showEvidence, setShowEvidence] = useState(false);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     setSnap(null);
@@ -18,12 +20,15 @@ export default function MachineDetail({ machineId, asOf, meta }) {
     setShowEvidence(false);
     api.machine(machineId, asOf).then(setSnap).catch((e) => setError(e.message));
     api.trend(machineId).then(setTrend).catch(() => setTrend(null));
-  }, [machineId, asOf]);
+  }, [machineId, asOf, retry]);
 
   if (error) {
     return (
-      <section className="panel">
-        <p className="error">{error}</p>
+      <section className="panel" role="alert">
+        <p className="error">We couldn’t load this machine’s details.</p>
+        <button className="primary" type="button" onClick={() => setRetry((n) => n + 1)}>
+          Try again
+        </button>
       </section>
     );
   }
@@ -57,7 +62,7 @@ export default function MachineDetail({ machineId, asOf, meta }) {
           <span className="mono">{snap.machine_id}</span>
           <span className={`pill band-${band}`}>{snap.risk_band}</span>
         </h2>
-        <span className="mono muted tiny">{snap.as_of}</span>
+        <span className="mono muted tiny">{formatTimestamp(snap.as_of)}</span>
       </div>
 
       <div className={`risk-hero band-${band}`}>
@@ -66,40 +71,43 @@ export default function MachineDetail({ machineId, asOf, meta }) {
           chance of failure in the next {meta ? meta.horizon_hours : 24} hours
           <br />
           <span className="muted tiny">
-            {snap.line} · {snap.hours_of_history.toLocaleString()} hours of history
+            {snap.line} · {snap.hours_of_history.toLocaleString()} hours of recorded history
           </span>
         </span>
       </div>
 
       {snap.cold_start && (
         <p className="note warn">
-          Only {snap.hours_of_history} hours of history and no recorded failures.
-          This is a real prediction, but it has never been validated for this
-          machine — treat it with lower confidence than the rest of the fleet.
+          This machine has only {snap.hours_of_history} hours of recorded history
+          and no recorded failures. Its score is a real estimate, but it has not
+          yet been validated on this machine, so treat it with extra caution.
         </p>
       )}
 
       <div className="stat-row">
-        <Stat label="24h ago" value={fmtPct(snap.risk_24h_ago)} />
-        <Stat label="7d ago" value={fmtPct(snap.risk_7d_ago)} />
+        <Stat label="Risk 24 hours ago" value={fmtPct(snap.risk_24h_ago)} />
+        <Stat label="Risk 7 days ago" value={fmtPct(snap.risk_7d_ago)} />
         <Stat
-          label="Since maintenance"
+          label="Hours since maintenance"
           value={`${snap.current_readings.run_hours_since_maintenance} h`}
         />
-        <Stat label="Failures on record" value={snap.prior_failures_on_record} />
+        <Stat label="Recorded failures" value={snap.prior_failures_on_record} />
       </div>
 
-      <h3>Why — read from this machine’s own numbers</h3>
+      <h3>Why this risk?</h3>
+      <p className="section-caption">
+        The explanation compares this machine’s readings with its own usual behaviour.
+      </p>
       <button className="primary" onClick={askForExplanation} disabled={explaining}>
-        {explaining ? "Asking…" : explanation ? "Ask again" : "Explain this risk"}
+        {explaining ? "Preparing explanation…" : explanation ? "Explain again" : "Explain in plain language"}
       </button>
 
       {explanation && (
         <div className="explanation">
           <p>{explanation.explanation}</p>
           <p className="mono muted tiny">
-            {explanation.model}
-            {explanation.cached ? " · cached for this hour" : " · generated just now"}
+            Based on this machine’s readings
+            {explanation.cached ? " · reused for this same hour" : " · prepared just now"}
           </p>
           <button className="linkish" onClick={() => setShowEvidence((v) => !v)}>
             {showEvidence ? "Hide" : "Show"} the numbers it was given
@@ -112,15 +120,20 @@ export default function MachineDetail({ machineId, asOf, meta }) {
         </div>
       )}
 
-      <h3>Risk drivers</h3>
+      <h3>What is driving the risk?</h3>
+      <p className="section-caption">
+        “Compared with usual” shows how far each reading is from this machine’s normal level.
+      </p>
+      <div className="table-scroll">
       <table className="drivers">
+        <caption className="sr-only">Current readings compared with this machine’s usual levels.</caption>
         <thead>
           <tr>
-            <th>Reading</th>
-            <th className="num">Now</th>
-            <th className="num">Its normal</th>
-            <th className="num">vs normal</th>
-            <th className="num">Pctile</th>
+            <th>Measure</th>
+            <th className="num">Current</th>
+            <th className="num">Usual level</th>
+            <th className="num">Compared with usual</th>
+            <th className="num">How unusual</th>
           </tr>
         </thead>
         <tbody>
@@ -145,9 +158,10 @@ export default function MachineDetail({ machineId, asOf, meta }) {
           ))}
         </tbody>
       </table>
+      </div>
       <p className="tiny muted">
-        “vs normal” is the reading divided by this machine’s own running median —
-        the same ratio the risk model keys on. 1.0× is business as usual.
+        “How unusual” is the current reading’s position in this machine’s own history.
+        A value of 1.0× compared with usual means business as usual.
       </p>
 
       <h3>Risk over time</h3>

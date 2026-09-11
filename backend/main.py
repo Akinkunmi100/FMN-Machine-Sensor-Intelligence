@@ -17,27 +17,29 @@ Two distinct score sources, deliberately kept apart:
 Run locally:  uvicorn backend.main:app --reload --port 8000
 """
 
-import sys
+import logging
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "src"))
+logger = logging.getLogger(__name__)
 
-import pandas as pd  # noqa: E402
-from fastapi import FastAPI, HTTPException, Query, Request  # noqa: E402
-from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from fastapi.responses import FileResponse  # noqa: E402
-from fastapi.staticfiles import StaticFiles  # noqa: E402
-from pydantic import BaseModel, Field  # noqa: E402
+import pandas as pd
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
-import llm_explain  # noqa: E402
-import llm_qa  # noqa: E402
-from features import NEW_MACHINES  # noqa: E402
-from risk_context import (  # noqa: E402
+from src import llm_explain
+from src import llm_qa
+from src.config import (
+    COLD_START_MACHINES,
+    FRONTEND_DIST,
+    HISTORICAL_SCORES_PATH,
     RISK_BANDS,
+)
+from src.risk_context import (
     band_report,
     fleet_activity_summary,
     fleet_snapshot,
@@ -47,8 +49,8 @@ from risk_context import (  # noqa: E402
     score_frame,
 )
 
-OOS_PATH = ROOT / "models" / "historical_scores_oos.parquet"
-FRONTEND_DIST = ROOT / "frontend" / "dist"
+NEW_MACHINES = list(COLD_START_MACHINES)
+OOS_PATH = HISTORICAL_SCORES_PATH
 
 STATE: dict = {}
 # Explanations are cached per (machine, timestamp) purely so re-renders and tab
@@ -94,10 +96,14 @@ async def lifespan(app: FastAPI):
     # between requests, so there is no reason to recompute it per call.
     STATE["activity"] = (fleet_activity_summary(STATE["oos"], failures)
                          if STATE["oos"] is not None else None)
-    print(f"[startup] scored {len(scored):,} machine-hours, "
-          f"{scored['machine_id'].nunique()} machines, "
-          f"{len(failures)} recorded failures, "
-          f"OOS scores {'loaded' if STATE['oos'] is not None else 'MISSING'}")
+    logger.info(
+        "Scored %s machine-hours across %s machines; %s recorded failures; "
+        "out-of-sample scores %s",
+        f"{len(scored):,}",
+        scored["machine_id"].nunique(),
+        len(failures),
+        "loaded" if STATE["oos"] is not None else "missing",
+    )
     yield
     STATE.clear()
 
@@ -245,7 +251,7 @@ def get_trend(machine_id: str):
     oos = STATE.get("oos")
     if oos is None:
         raise HTTPException(
-            503, "historical scores missing — run python src/build_historical_scores.py"
+            503, "historical scores missing — run python -m src.build_historical_scores"
         )
     g = oos[oos["machine_id"] == machine_id].sort_values("timestamp")
     if g.empty:
@@ -299,12 +305,12 @@ def explain(request: Request, machine_id: str,
         return cached
     try:
         result = llm_explain.explain_machine_risk(snap)
-    except Exception as exc:
+    except Exception:
         # The real exception (e.g. a Groq API error, possibly carrying
         # request detail) is logged server-side but never returned to the
         # client verbatim -- a provider error message is not something a
         # plant-floor UI should surface raw.
-        print(f"[explain] {machine_id} failed: {exc}")
+        logger.exception("Machine explanation failed for %s", machine_id)
         raise HTTPException(
             502, "The explanation service is temporarily unavailable. Try again shortly."
         )
@@ -327,8 +333,8 @@ def qa(request: Request, payload: Question):
         return llm_qa.answer_question(q, scored=scored_frame())
     except HTTPException:
         raise
-    except Exception as exc:
-        print(f"[qa] question failed: {exc}")
+    except Exception:
+        logger.exception("Plant question failed")
         raise HTTPException(
             502, "The question service is temporarily unavailable. Try again shortly."
         )

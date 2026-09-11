@@ -7,7 +7,8 @@ the API does not recompute rolling features on every process restart.
 
 import sys
 
-from risk_context import CURRENT_SCORES_PATH, score_frame
+from .config import CURRENT_SCORES_PATH
+from .risk_context import score_frame
 
 
 def main() -> int:

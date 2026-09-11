@@ -5,7 +5,7 @@ Grounding contract: the model is given ONLY the retrieved snapshot from
 risk_context.machine_snapshot() and is instructed to reason from those numbers.
 The snapshot carries each driver's percentile against that machine's OWN
 history, so the reasoning — not just the digits — has to change when the
-sensor picture changes. src/test_llm_grounded.py enforces that.
+sensor picture changes.
 
 Requires GROQ_API_KEY in the environment (loaded from .env, which is gitignored).
 """
@@ -146,7 +146,7 @@ if __name__ == "__main__":
 
     sys.stdout.reconfigure(encoding="utf-8")
 
-    from risk_context import machine_snapshot, score_frame
+    from .risk_context import machine_snapshot, score_frame
 
     scored = score_frame()
 

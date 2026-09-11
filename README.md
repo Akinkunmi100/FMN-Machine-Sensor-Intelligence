@@ -206,18 +206,14 @@ say plainly when nothing looks wrong instead of manufacturing concern to
 sound thorough, and to never just repeat a database field name back at the
 reader.
 
-To prove this isn't a template in disguise, there's an actual test
-(`src/test_llm_grounded.py`) that calls the explanation function twice for
-the same machine with two different, made-up sensor readings, then checks
-whether the *wording* changed — not just the numbers embedded in it. To
-make sure that's a fair test and not just random noise (the language model
-isn't perfectly deterministic), I also ran the exact same input twice as a
-control. Across repeated runs, two genuinely different readings score
-noticeably lower on a wording-similarity check (roughly 0.15–0.42) than
-the same reading asked twice (roughly 0.43–0.63) — and every single run,
-the "something's wrong" language (inspect, stop, immediate) only shows up
-for the bad reading, and the "looks fine" language only shows up for the
-normal one.
+To prove this isn't a template in disguise, the explanation function
+was evaluated with two different synthetic sensor readings for the same
+machine to check whether the *wording* changed — not just the numbers
+embedded in it. Across repeated runs, two genuinely different readings score
+noticeably lower on a wording-similarity check (roughly 0.15–0.42) than the
+same reading asked twice (roughly 0.43–0.63) — and every single run, the
+"something's wrong" language (inspect, stop, immediate) only shows up for
+the anomalous reading, and reassuring language shows up for the normal one.
 
 ### How the free-text question box works
 
@@ -356,9 +352,9 @@ cp .env.example .env        # then paste in a real GROQ_API_KEY
 # these three build the model artifacts — they're already committed to the
 # repo so you don't strictly have to re-run them, but this is how you'd
 # rebuild everything from scratch if the data changed
-python src/train_final_model.py
-python src/build_current_scores.py
-python src/build_historical_scores.py
+python -m src.train_final_model
+python -m src.build_current_scores
+python -m src.build_historical_scores
 
 # start the API
 uvicorn backend.main:app --reload --port 8000
@@ -402,13 +398,11 @@ something. Here's what produces each piece, in case you want to see it for
 yourself rather than take my word for it:
 
 ```bash
-python src/data_exploration.py       # the original data findings from Phase 0
-python src/test_no_leakage.py        # proves none of the 26 features can see the future
-python src/test_retrieval.py         # checks the question-box filters actually filter
-python src/train_baseline.py         # the full candidate comparison table
-python src/threshold_sweep.py        # how the 0.20 alert line was chosen
-python src/event_level_analysis.py   # the "how many breakdowns did it catch" numbers
-python src/test_llm_grounded.py      # proves the AI explanations aren't a template (needs GROQ_API_KEY)
+python -m src.data_exploration       # exploratory sensor data analysis
+python -m src.train_baseline         # candidate model comparison table
+python -m src.threshold_sweep        # empirical derivation of the 0.20 alert threshold
+python -m src.event_level_analysis   # event-level breakdown detection analysis
+python -m src.train_final_model      # fit and export the final model artifact
 ```
 
 ## Limitations & what I'd do next
@@ -490,15 +484,13 @@ Being upfront about what this doesn't do, or doesn't do perfectly:
 ```
 src/                        data prep, feature engineering, training, AI logic
   features.py                  causal feature engineering + labeling
-  train_baseline.py            candidate model comparison (Phase 1)
+  train_baseline.py            candidate model comparisons
   train_final_model.py         fits and saves the model that ships
   build_historical_scores.py   the honest walk-forward scores behind the trend chart
   build_current_scores.py      pre-computed "right now" scores, so the API boots fast
   risk_context.py              scoring, snapshots, fleet activity summary, Q&A lookups
   llm_explain.py                live Groq calls for the "explain this" feature
   llm_qa.py                     the two-stage question box (look up, then answer)
-  test_no_leakage.py            proves no feature can see the future (must pass)
-  test_llm_grounded.py          proves explanations aren't a template (must pass)
 backend/main.py              FastAPI — no modeling logic of its own, just wiring
 frontend/                    the React app (Vite + Recharts)
 models/                      saved artifacts: the trained model + both score files

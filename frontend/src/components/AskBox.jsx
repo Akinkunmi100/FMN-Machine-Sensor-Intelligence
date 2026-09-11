@@ -29,7 +29,12 @@ export default function AskBox() {
   };
 
   return (
-    <section className="panel ask">
+    <section className="panel ask" aria-labelledby="ask-heading">
+      <h2 id="ask-heading">Ask about the plant</h2>
+      <p className="section-caption">
+        Ask in plain language about machines, lines, breakdowns, or maintenance.
+        Answers are based on the records in this dashboard.
+      </p>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -37,6 +42,8 @@ export default function AskBox() {
         }}
       >
         <input
+          id="plant-question"
+          aria-label="Ask a question about the plant"
           type="text"
           value={question}
           placeholder="Ask about any machine, line, failure or maintenance record…"
@@ -50,17 +57,17 @@ export default function AskBox() {
       {!result && !busy && (
         <div className="examples">
           {EXAMPLES.map((e) => (
-            <button key={e} className="chip-btn" onClick={() => ask(e)}>
+            <button key={e} className="chip-btn" type="button" onClick={() => ask(e)}>
               {e}
             </button>
           ))}
         </div>
       )}
 
-      {error && <p className="error">{error}</p>}
+      {error && <p className="error" role="alert">We couldn’t answer that right now. Please try again.</p>}
 
       {result && (
-        <div className="answer">
+        <div className="answer" aria-live="polite">
           <p className="answer-text">{result.answer}</p>
           <button className="linkish" onClick={() => setShowEvidence((v) => !v)}>
             {showEvidence ? "Hide" : "Show"} the records this used

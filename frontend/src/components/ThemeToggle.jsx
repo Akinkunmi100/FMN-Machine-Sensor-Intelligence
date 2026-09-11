@@ -33,7 +33,8 @@ export default function ThemeToggle() {
     <button
       className="theme-toggle"
       onClick={() => setMode(next[mode])}
-      title="Cycle theme: auto / light / dark"
+      aria-label={`Colour theme: ${labels[mode]}. Click to change.`}
+      title="Change colour theme"
       type="button"
     >
       {labels[mode]}

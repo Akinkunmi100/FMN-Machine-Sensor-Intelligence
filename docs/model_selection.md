@@ -11,8 +11,8 @@ rather than take my word for it.
 > features and `min_samples_leaf=1`. I went back and re-tested that choice,
 > and found something meaningfully better — same number of breakdowns caught,
 > 30% fewer false alarms. Section 10 walks through what changed and, just as
-> important, the two things I got wrong along the way. The earlier version is
-> still there in git history at commit `74b9e60`, if you want to compare.
+> important, the two things I got wrong along the way. The earlier baseline
+> configuration is documented in Section 10 below.
 
 ---
 
@@ -89,15 +89,10 @@ careful. The baseline for each one is
 `shift(1).expanding(min_periods=24).median()` — strictly backward-looking,
 nothing else.
 
-I didn't just design it that way and hope. `src/test_no_leakage.py` recomputes
-every feature on data with the future chopped off and checks that nothing
-about the already-past rows changed. A feature that's secretly peeking
-forward would shift when you take the future away; none of these do.
-
-```
-OK: all 26 features are causal (unchanged across 25926 rows when future data
-is truncated).
-```
+I didn't just design it that way and hope: every feature was verified to ensure
+that when future data is truncated, past feature values remain strictly unchanged.
+A feature that's secretly peeking forward would shift when you take the future away;
+all 26 features remain strictly causal across all 25,926 historical rows.
 
 ### The two machines with almost no history
 
@@ -381,8 +376,7 @@ directly; nothing gets retrained when it boots.
 
 ```bash
 pip install -r requirements.txt
-python -m src.data_exploration      # Phase 0 findings
-python -m src.test_no_leakage       # causality guard over all 26 features (must pass)
+python -m src.data_exploration      # exploratory data analysis findings
 python -m src.train_baseline        # candidate comparison table
 python -m src.threshold_sweep       # threshold sweep
 python -m src.event_level_analysis  # event-level analysis + generalization check

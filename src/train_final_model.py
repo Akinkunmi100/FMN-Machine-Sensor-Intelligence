@@ -14,35 +14,25 @@ hyperparameters. The saved metadata records exactly what it saw.
 """
 
 import json
-from pathlib import Path
 
 import joblib
 import pandas as pd
 import sklearn
 from sklearn.ensemble import RandomForestClassifier
 
-from features import NEW_MACHINES, build_dataset
-
-CSV_PATH = "project2_manufacturing_sensors.csv"
-HORIZON_HOURS = 24
-ALERT_THRESHOLD = 0.20
-MODEL_DIR = Path("models")
-MODEL_PATH = MODEL_DIR / "failure_risk_rf.joblib"
-METADATA_PATH = MODEL_DIR / "failure_risk_rf.meta.json"
-
-# min_samples_leaf=20 was adopted after a post-Phase-2 re-examination. On its
-# own it is WORSE operationally (+17 false episodes at equal event capture);
-# combined with the per-machine relative features it is better (-16). Neither
-# change helps alone — ratio features are higher-variance and need the heavier
-# leaf constraint, and the constraint needs the richer features to exploit.
-MODEL_PARAMS = dict(
-    n_estimators=300,
-    max_depth=8,
-    min_samples_leaf=20,
-    class_weight="balanced",
-    random_state=42,
-    n_jobs=-1,
+from .config import (
+    ALERT_THRESHOLD,
+    DATA_PATH,
+    METADATA_PATH,
+    MODEL_DIR,
+    MODEL_PARAMS,
+    MODEL_PATH,
+    PREDICTION_HORIZON_HOURS,
 )
+from .features import NEW_MACHINES, build_dataset
+
+CSV_PATH = str(DATA_PATH)
+HORIZON_HOURS = PREDICTION_HORIZON_HOURS
 
 
 def main():

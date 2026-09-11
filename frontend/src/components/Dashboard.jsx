@@ -1,10 +1,15 @@
 import { useMemo, useState } from "react";
 import Sparkline from "./Sparkline.jsx";
+import { formatThreshold, formatTimestamp } from "../format.js";
 
 const pct = (v) => `${(v * 100).toFixed(v >= 0.1 ? 0 : 1)}%`;
 
 const LINES = ["Line A", "Line B", "Line C"];
-const BANDS = ["HIGH", "MEDIUM", "LOW"];
+const BANDS = [
+  { value: "HIGH", label: "High risk" },
+  { value: "MEDIUM", label: "Watch" },
+  { value: "LOW", label: "Low risk" },
+];
 
 export default function Dashboard({ fleet, loading, meta, selected, onSelect }) {
   // All hooks run on every render, before any early return — a hook called
@@ -55,21 +60,25 @@ export default function Dashboard({ fleet, loading, meta, selected, onSelect }) 
     <section className="panel fleet">
       <div className="panel-head">
         <h2>Fleet</h2>
-        <span className="mono muted tiny">{as_of}</span>
+        <span className="mono muted tiny">{formatTimestamp(as_of)}</span>
       </div>
+      <p className="section-caption fleet-caption">
+        Every machine ranked by its estimated chance of failure in the next {meta?.horizon_hours ?? 24} hours.
+        Select a row to see the details.
+      </p>
 
       <div className="counts">
-        {BANDS.map((band) => (
+        {BANDS.map(({ value, label }) => (
           <div
-            key={band}
+            key={value}
             className={[
               "count",
-              `band-${band.toLowerCase()}`,
-              counts[band] > 0 ? "is-live" : "",
+              `band-${value.toLowerCase()}`,
+              counts[value] > 0 ? "is-live" : "",
             ].join(" ")}
           >
-            <span className="count-n">{counts[band]}</span>
-            <span className="count-l">{band}</span>
+            <span className="count-n">{counts[value]}</span>
+            <span className="count-l">{label}</span>
           </div>
         ))}
       </div>
@@ -91,54 +100,59 @@ export default function Dashboard({ fleet, loading, meta, selected, onSelect }) 
       )}
 
       <div className="filterbar">
-        <span className="label">Filter</span>
+        <span className="label">Show</span>
         <div className="filter-group">
           {LINES.map((l) => (
             <button
               key={l}
               className={`filter-chip${lineFilter === l ? " active" : ""}`}
+              aria-pressed={lineFilter === l}
               onClick={() => setLineFilter(lineFilter === l ? null : l)}
             >
-              {l.replace("Line ", "L")}
+              {l}
             </button>
           ))}
         </div>
         <div className="filter-group">
-          {BANDS.map((b) => (
+          {BANDS.map(({ value, label }) => (
             <button
-              key={b}
-              className={`filter-chip${bandFilter === b ? " active" : ""}`}
-              onClick={() => setBandFilter(bandFilter === b ? null : b)}
+              key={value}
+              className={`filter-chip${bandFilter === value ? " active" : ""}`}
+              aria-pressed={bandFilter === value}
+              onClick={() => setBandFilter(bandFilter === value ? null : value)}
             >
-              {b}
+              {label}
             </button>
           ))}
         </div>
         <div className="filter-group">
           <button
             className={`filter-chip${coldFilter === true ? " active" : ""}`}
+            aria-pressed={coldFilter === true}
             onClick={() => setColdFilter(coldFilter === true ? null : true)}
           >
             New machines
           </button>
         </div>
         {anyFilterActive && (
-          <button className="filter-clear" onClick={clearFilters}>
+          <button className="filter-clear" onClick={clearFilters} type="button">
             Clear
           </button>
         )}
       </div>
 
+      <div className="table-scroll">
       <table className="fleet-table">
+        <caption className="sr-only">Machines ranked by estimated failure risk. Select a row to open its details.</caption>
         <thead>
           <tr>
             <th>Machine</th>
             <th>Line</th>
             <th className="num">Risk</th>
             <th>State</th>
-            <th className="num">Vib</th>
-            <th className="num">Temp</th>
-            <th>30-day history</th>
+            <th className="num">Vibration</th>
+            <th className="num">Temperature</th>
+            <th>Recent risk</th>
           </tr>
         </thead>
         <tbody>
@@ -149,7 +163,15 @@ export default function Dashboard({ fleet, loading, meta, selected, onSelect }) 
                 key={m.machine_id}
                 onClick={() => onSelect(m.machine_id)}
                 tabIndex={0}
-                onKeyDown={(e) => e.key === "Enter" && onSelect(m.machine_id)}
+                role="button"
+                aria-pressed={selected === m.machine_id}
+                aria-label={`Open details for ${m.machine_id}, ${pct(m.risk)} risk, ${m.risk_band.toLowerCase()}`}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSelect(m.machine_id);
+                  }
+                }}
                 className={[
                   "row",
                   `band-${band}`,
@@ -189,11 +211,12 @@ export default function Dashboard({ fleet, loading, meta, selected, onSelect }) 
           )}
         </tbody>
       </table>
+      </div>
 
       {meta && (
         <p className="foot mono muted">
-          alert ≥ {meta.risk_bands.high} · watch ≥ {meta.risk_bands.medium} ·{" "}
-          {meta.n_features} features · {meta.horizon_hours}h horizon
+          High risk starts at {formatThreshold(meta.risk_bands.high)} · watch starts at {formatThreshold(meta.risk_bands.medium)} ·{" "}
+          looks ahead {meta.horizon_hours} hours
         </p>
       )}
     </section>
