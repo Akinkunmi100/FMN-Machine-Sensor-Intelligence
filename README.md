@@ -1,6 +1,6 @@
 # Predictive Maintenance: Industrial Sensor Intelligence Platform
 
-A condition monitoring and failure risk forecasting platform for industrial manufacturing equipment. The system ingests hourly multi-sensor telemetry, predicts equipment breakdown risk within a 24-hour forward window, generates diagnostic summaries via a live LLM layer, tracks walk-forward out-of-sample risk trends, and provides natural-language querying over fleet operational history.
+An industrial condition monitoring and predictive maintenance platform for manufacturing equipment. The system processes continuous sensor telemetry to forecast breakdown risk within a 24-hour window, generates plain-language diagnostic summaries, and enables operators to track historical fleet health trends.
 
 **Live Application:** [https://predictive-maintenance-ypxa.onrender.com/](https://predictive-maintenance-ypxa.onrender.com/)
 
@@ -28,18 +28,18 @@ The operational dataset (`project2_manufacturing_sensors.csv`) covers two groups
 ### Reactive Maintenance Dynamics & Label Leakage Prevention
 During initial data analysis, the `run_hours_since_maintenance` counter appeared to offer an indicator of equipment usage. However, 77.3% of all service resets coincide with or immediately follow a recorded breakdown event.
 
-Plant maintenance in this facility is predominantly reactive: machines operate until a failure occurs, after which repair crews service the unit and reset the counter. Deriving forward-looking features from maintenance resets (such as estimating time until next service) introduces direct label leakage, artificially inflating offline evaluation metrics while failing in live deployment. All engineered features are strictly restricted to historical telemetry up to timestamp $t$.
+Plant maintenance in this facility is predominantly reactive: machines operate until a failure occurs, after which repair crews service the unit and reset the counter. Because maintenance resets occur after failures, using future reset times would introduce target leakage and distort evaluation results. All features are therefore calculated strictly from sensor history recorded prior to the prediction hour.
 
 ### Data Preprocessing & Edge Cases
-* **Duplicate Telemetry Rows:** Machine `MCH-200` contains 10 duplicate rows with identical timestamps and sensor readings (none occurring during breakdown events). These rows are retained in the pipeline to maintain exact row-count parity with exploratory baselines rather than altering raw data.
-* **Sensor Missingness:** Telemetry dropouts in the dataset occur predominantly as isolated single-hour gaps. These are interpolated along the time index using causal linear interpolation without lookahead.
+* **Duplicate Telemetry Rows:** Machine `MCH-200` contains 10 duplicate rows with identical timestamps and sensor readings (none occurring during breakdown events). These rows are kept to match the original raw dataset and maintain consistent row counts across all analysis scripts.
+* **Sensor Missingness:** Missing sensor readings are almost entirely single-hour dropouts, which are filled using linear interpolation from previous values without looking ahead into future readings.
 
 ---
 
 ## 2. Approach
 
 ### System Architecture Overview
-The platform consists of an offline machine learning pipeline, a FastAPI web application, and a localized LLM diagnostic interface:
+The platform consists of a machine learning pipeline, a FastAPI web application, and a localized LLM diagnostic interface:
 
 ```
                                   +------------------------------+
@@ -94,7 +94,7 @@ Machine-relative features account for 70.7% of total model importance and reduce
 | Hours since last maintenance | Minimal (<0.1%) | Confirms leakage prevention; reactive resets provide little causal predictive signal |
 
 ### Model Selection & Validation Scheme
-Evaluation is conducted using an 80/20 chronological split and two expanding time-series cross-validation folds. A 24-hour buffer window is applied between training and test sets to prevent label contamination across split boundaries.
+Evaluation is conducted using an 80/20 split and two expanding time-series cross-validation folds. A 24-hour buffer window separates training and test sets so that 24-hour forward failure labels do not overlap the test period.
 
 #### Candidate Benchmark Comparison:
 
@@ -127,11 +127,11 @@ Model predictions are mapped to three operational action levels:
 
 ### Dual-Scoring Strategy & Cold-Start Handling
 * **Dual Scoring:** Real-time fleet monitoring uses the model trained on all historical observations (`models/current_scores.parquet`), while the UI activity timeline uses rolling out-of-sample walk-forward scoring (`models/historical_scores_oos.parquet`) to reflect strictly causal historical outputs.
-* **Cold-Start Assets (`MCH-300`, `MCH-301`):** Assets with less than 24 hours of operating history default relative ratios to 1.0 (neutral), relying on raw telemetry boundaries. `machine_id` is excluded from model training features to allow generalization to unseen equipment, and cold-start assets are flagged with explicit confidence indicators in the user interface.
+* **Cold-Start Assets (`MCH-300`, `MCH-301`):** Assets with less than 24 hours of operating history default relative ratios to 1.0 (neutral), relying on raw telemetry boundaries. Cold-start assets are flagged with explicit confidence indicators in the user interface.
 
 ### Condition Monitoring & LLM Reasoning Layer
 The platform integrates Groq runtime inference (`openai/gpt-oss-120b`) for explainability and fleet queries:
-* **Grounded Machine Explanations (`src/llm_explain.py`):** The backend builds a structured numeric telemetry snapshot per machine (current readings, baseline ratios, driver percentiles). The LLM translates these ratios into concise plain-language maintenance summaries rather than static response templates. Verification tests confirm that output text reflects underlying sensor severity.
+* **Grounded Machine Explanations (`src/llm_explain.py`):** The backend builds a structured numeric telemetry snapshot per machine (current readings, baseline ratios, driver percentiles). The LLM translates these ratios into concise plain-language maintenance summaries. Verification tests confirm that output text reflects underlying sensor severity.
 * **Two-Stage Deterministic Q&A (`src/llm_qa.py`):** Stage 1 uses deterministic regex parsing to extract entities (machine IDs, production lines, risk tiers, dates, failure history) and queries the parquet store directly. Stage 2 passes only the retrieved rows to the LLM with instructions to answer strictly from the provided records. The UI includes a provenance drawer displaying the exact records behind each response.
 * **Fault Tolerance & Caching:** Dashboards, sensor charts, and fleet rankings operate independently of the LLM service. Missing or invalid API keys do not interrupt core platform functionality. Explanations are cached in memory per machine-hour, and upstream Groq rate limits (8,000 tokens/minute) are caught to return clear HTTP 429 notices rather than exposing raw server errors.
 

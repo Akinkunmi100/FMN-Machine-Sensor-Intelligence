@@ -254,10 +254,13 @@ def fleet_activity_summary(oos: pd.DataFrame, failures: pd.DataFrame,
             round((f["timestamp"] - alerts["timestamp"].min()).total_seconds() / 3600, 1)
             if caught else None
         )
+        peak_risk = float(window["risk"].max())
         events.append({
             "machine_id": f["machine_id"], "line": f["line"],
             "timestamp": str(f["timestamp"]), "caught": caught,
             "lead_hours": lead_hours,
+            "peak_risk": round(peak_risk, 4),
+            "peak_band": band_for(peak_risk),
         })
 
     caught_events = [e for e in events if e["caught"]]

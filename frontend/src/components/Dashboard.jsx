@@ -144,15 +144,33 @@ export default function Dashboard({ fleet, loading, meta, selected, onSelect }) 
       <div className="table-scroll">
       <table className="fleet-table">
         <caption className="sr-only">Machines ranked by estimated failure risk. Select a row to open its details.</caption>
+        <colgroup>
+          <col style={{ width: "20%" }} />
+          <col style={{ width: "8%" }} />
+          <col style={{ width: "12%" }} />
+          <col style={{ width: "13%" }} />
+          <col style={{ width: "15%" }} />
+          <col style={{ width: "15%" }} />
+          <col style={{ width: "17%" }} />
+        </colgroup>
         <thead>
           <tr>
             <th>Machine</th>
             <th>Line</th>
             <th className="num">Risk</th>
             <th>State</th>
-            <th className="num">Vibration</th>
-            <th className="num">Temperature</th>
-            <th>Recent risk</th>
+            <th className="num" title="Vibration in mm/s">
+              <span className="th-full">Vibration</span>
+              <span className="th-short">Vib</span>
+            </th>
+            <th className="num" title="Temperature in Celsius">
+              <span className="th-full">Temperature</span>
+              <span className="th-short">Temp</span>
+            </th>
+            <th title="24-hour risk trend">
+              <span className="th-full">Recent risk</span>
+              <span className="th-short">Trend</span>
+            </th>
           </tr>
         </thead>
         <tbody>

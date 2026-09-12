@@ -27,9 +27,8 @@ export default function Sparkline({ points, threshold = THRESHOLD }) {
   return (
     <svg
       className="sparkline"
-      width={W}
-      height={H}
       viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
       role="img"
       aria-label={
         hadAlert

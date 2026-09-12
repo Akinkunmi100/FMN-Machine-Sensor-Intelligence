@@ -5,6 +5,7 @@ import MachineDetail from "./components/MachineDetail.jsx";
 import AskBox from "./components/AskBox.jsx";
 import TimeControl from "./components/TimeControl.jsx";
 import ActivityStrip from "./components/ActivityStrip.jsx";
+import BreakdownHistory from "./components/BreakdownHistory.jsx";
 import ThemeToggle from "./components/ThemeToggle.jsx";
 import { formatTimestamp } from "./format.js";
 
@@ -102,6 +103,16 @@ export default function App() {
 
       {meta && (
         <ActivityStrip
+          meta={meta}
+          onJumpTo={(timestamp) => {
+            setAsOf(timestamp);
+            setSelected(null);
+          }}
+        />
+      )}
+
+      {meta && (
+        <BreakdownHistory
           meta={meta}
           onJumpTo={(timestamp) => {
             setAsOf(timestamp);
