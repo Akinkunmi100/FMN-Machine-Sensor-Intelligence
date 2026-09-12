@@ -8,38 +8,38 @@ A condition monitoring and failure risk forecasting platform for industrial manu
 
 ## 1. Problem Understanding
 
-### Operational Context & Sponsor Mandate
-Continuous industrial manufacturing operations depend heavily on electro-mechanical equipment running uninterrupted across multi-stage production lines. When a critical machine suffers an unexpected breakdown, the impact is rarely isolated: downstream production halts, raw product batches spoil, and mechanical components sustain secondary damage. 
+### Operational Context & Objectives
+Continuous manufacturing operations rely on mechanical equipment running across production lines. Unplanned breakdowns interrupt production schedules, generate scrap material, and risk secondary mechanical damage.
 
-The sponsor's operational mandate is to transition plant operations from reactive fire-fighting to proactive condition monitoring by delivering:
-1. An actionable **24-hour forward warning window** that provides maintenance crews sufficient lead time to inspect equipment, coordinate planned changeovers, and stage replacement parts before catastrophic breakdown occurs.
-2. **Interpretable diagnostics** grounded in machine-specific sensor telemetry, moving beyond opaque risk scores so maintenance technicians understand exactly which physical indicators are driving an alert.
-3. An operational software platform providing both real-time fleet surveillance and verifiable historical risk auditing.
+This project delivers an industrial predictive maintenance system designed around three core operational requirements:
+1. **24-Hour Warning Window:** Predict breakdown risk within a 24-hour forward window, giving maintenance teams adequate lead time to inspect equipment, coordinate scheduled stops, and prepare replacement parts.
+2. **Interpretable Diagnostics:** Provide sensor-level explanations for elevated risk scores so maintenance technicians understand which telemetry streams drove an alert.
+3. **Operational Platform:** Deliver an interactive web dashboard for real-time fleet surveillance alongside historical out-of-sample trend analysis.
 
-### Operational Tension: Recall vs. Alert Fatigue
-The central engineering challenge in industrial monitoring is balancing failure detection against operational credibility. A system tuned to alert only on extreme anomalies will miss subtle pre-failure degradation, leading to costly uncoordinated downtime. Conversely, a system that generates frequent false alarms quickly induces alert fatigue, causing plant personnel to ignore notifications entirely. Resolving this tension requires aligning evaluation metrics directly with event-level maintenance interventions rather than naive row-level statistics.
+### Operational Trade-off: Detection vs. False Alarms
+Industrial condition monitoring requires balancing early detection against operational costs. Setting alert thresholds too conservatively risks missing developing equipment degradation. Conversely, excessive false alarms waste technician hours and erode confidence in automated alerts. The evaluation framework is therefore built around event-level detection rates and false alarm episode counts rather than standard row-level metrics.
 
-### Dataset Characteristics & Severe Class Imbalance
-The operational dataset (`project2_manufacturing_sensors.csv`) exhibits several distinct structural properties:
-* **Fleet Profile:** 15 established machines tracked across 120 days of continuous hourly telemetry (January to April 2026), alongside 2 newly commissioned cold-start machines (`MCH-300`, `MCH-301`) with 72 hours (approximately 3 days) of operating history.
-* **Extreme Event Sparsity:** 17 total failure events occur across 43,354 recorded machine-hours, representing a baseline failure rate of 0.039%.
-* **The Accuracy Paradox:** A naive classification baseline that predicts zero failures achieves 99.96% raw accuracy while detecting zero breakdowns. Accuracy is therefore fundamentally disqualified as an evaluation metric.
+### Dataset Characteristics & Class Imbalance
+The operational dataset (`project2_manufacturing_sensors.csv`) covers two groups of machines:
+* **Fleet Profile:** 15 established machines tracked across 120 days of continuous hourly telemetry (January to April 2026), and 2 newly commissioned cold-start machines (`MCH-300`, `MCH-301`) with 72 hours (approximately 3 days) of operating history.
+* **Event Sparsity:** 17 total failure events occur across 43,354 recorded machine-hours, representing a baseline failure rate of 0.039%.
+* **Limitations of Raw Accuracy:** A baseline model predicting zero failures achieves 99.96% accuracy while identifying zero breakdowns. Evaluation must therefore rely on metrics tailored to severe class imbalance.
 
-### The Reactive Maintenance Trap (Label Leakage)
-During exploratory analysis, the `run_hours_since_maintenance` field appeared to offer a direct proxy for machine wear. However, detailed investigation revealed that 77.3% of all maintenance resets coincide with or immediately follow a recorded breakdown event. 
+### Reactive Maintenance Dynamics & Label Leakage Prevention
+During initial data analysis, the `run_hours_since_maintenance` counter appeared to offer an indicator of equipment usage. However, 77.3% of all service resets coincide with or immediately follow a recorded breakdown event.
 
-In this plant, maintenance operations are overwhelmingly *reactive*: machines run until failure occurs, after which repair crews service the asset and reset the counter. Deriving forward-looking features from maintenance resets (such as estimating time until next service) introduces direct label leakage, artificially inflating offline performance while collapsing in production. To preserve causal integrity, all feature pipelines are strictly restricted to backward-looking history up to timestamp $t$.
+Plant maintenance in this facility is predominantly reactive: machines operate until a failure occurs, after which repair crews service the unit and reset the counter. Deriving forward-looking features from maintenance resets (such as estimating time until next service) introduces direct label leakage, artificially inflating offline evaluation metrics while failing in live deployment. All engineered features are strictly restricted to historical telemetry up to timestamp $t$.
 
-### Data Hygiene & Edge Cases
-* **Duplicate Telemetry Rows:** Machine `MCH-200` contains 10 duplicate rows with identical timestamps and sensor readings (none occurring during breakdown events). These rows are retained in the pipeline to maintain exact row-count parity with initial exploratory baselines rather than silently modifying source data.
-* **Sensor Missingness:** Telemetry dropouts in the dataset occur predominantly as isolated, single-hour missing records. These are imputed causally via linear interpolation along the time index without lookahead leakage.
+### Data Preprocessing & Edge Cases
+* **Duplicate Telemetry Rows:** Machine `MCH-200` contains 10 duplicate rows with identical timestamps and sensor readings (none occurring during breakdown events). These rows are retained in the pipeline to maintain exact row-count parity with exploratory baselines rather than altering raw data.
+* **Sensor Missingness:** Telemetry dropouts in the dataset occur predominantly as isolated single-hour gaps. These are interpolated along the time index using causal linear interpolation without lookahead.
 
 ---
 
 ## 2. Approach
 
 ### System Architecture Overview
-The platform couples an offline causal machine learning pipeline with a decoupled, high-performance web service and an in-memory LLM diagnostic layer:
+The platform consists of an offline machine learning pipeline, a FastAPI web application, and a localized LLM diagnostic interface:
 
 ```
                                   +------------------------------+
@@ -67,34 +67,34 @@ Failure risk is framed as a 24-hour forward probability:
 
 $$\text{Risk} = P(\text{Failure Event occurs in } (t, t + 24\text{h}] \mid \text{Telemetry up to } t)$$
 
-Each machine-hour is labeled `1` if a failure occurs within the subsequent 24 hours, and `0` otherwise. The final 24 hours of each machine recording are censored (excluded from training) because their subsequent operational state cannot be verified.
+Each machine-hour is labeled `1` if a failure occurs within the subsequent 24 hours, and `0` otherwise. The final 24 hours of each machine recording are censored (excluded from training) because their subsequent operational state is unknown.
 
 #### Evaluation Metric Hierarchy:
-1. **Ranking Metric (AUC-PR):** Area Under the Precision-Recall Curve serves as the primary discriminator. Unlike ROC-AUC, AUC-PR is not flattered by the overwhelming volume of true negative operating hours.
-2. **Decision Metric (Event Capture vs. False Alarm Episodes):** Rather than tallying individual hourly predictions, consecutive alert hours on an asset are consolidated into single operational alert episodes. Models are selected based on the total count of real breakdown events detected prior to failure versus the total volume of false alarm episodes generated.
+1. **Ranking Metric (AUC-PR):** Area Under the Precision-Recall Curve serves as the primary discriminator. Unlike ROC-AUC, AUC-PR evaluates positive-class ranking performance without distortion from the large volume of non-failure operating hours.
+2. **Decision Metric (Event Capture vs. False Alarm Episodes):** Consecutive alert hours on an asset are grouped into single operational alert episodes. Models are selected based on the total number of real breakdowns detected prior to failure versus the total number of false alarm episodes produced.
 
 ### Causal Feature Engineering (26 Features)
-The feature engineering pipeline transforms raw sensor streams into 26 causal dimensions:
+The feature engineering pipeline transforms raw sensor telemetry into 26 causal features:
 1. **Raw Aggregates (19 features):** Rolling sensor averages (6h, 24h), rolling standard deviations (6h, 24h), backward differences (1h, 6h), run hours since maintenance, a 24h reset flag, and one-hot line identifiers.
-2. **Machine-Relative Normalization (7 features):** Rolling aggregates normalized by that specific machine's expanding historical median:
+2. **Machine-Relative Normalization (7 features):** Rolling aggregates normalized by each machine's historical median:
    $$\text{Baseline} = \text{shift}(1).\text{expanding}(\text{min\_periods}=24).\text{median}()$$
    $$\text{Relative Feature} = \frac{\text{Current Aggregate}}{\text{Baseline}}$$
 
-Relative features account for 70.7% of total model importance and reduce false alarms by approximately 30% at identical breakdown capture rates.
+Machine-relative features account for 70.7% of total model importance and reduce false alarms by approximately 30% at equivalent breakdown detection rates.
 
 #### Feature Importance Distribution:
 
 | Feature Dimension | Relative Contribution | Operational Significance |
 |---|---|---|
-| 24h average temperature (relative to machine baseline) | Highest (Rank 1) | Detects persistent thermal buildup specific to that unit |
-| 24h vibration volatility (relative to machine baseline) | 2nd (Rank 2) | Detects abnormal mechanical oscillation shifts |
-| 6h average temperature (relative to machine baseline) | 3rd (Rank 3) | Captures rapid short-term thermal acceleration |
-| 24h vibration volatility (raw absolute value) | 4th (Rank 4) | Enforces absolute fleet-wide mechanical ceilings |
-| 24h temperature volatility (raw absolute value) | 5th (Rank 5) | Enforces absolute fleet-wide thermal ceilings |
-| Hours since last maintenance | Negligible (<0.1%) | Confirms leakage prevention; reactive resets carry minimal causal signal |
+| 24h average temperature (relative to machine baseline) | Highest (Rank 1) | Identifies persistent thermal buildup specific to that unit |
+| 24h vibration volatility (relative to machine baseline) | 2nd (Rank 2) | Identifies abnormal mechanical oscillation shifts |
+| 6h average temperature (relative to machine baseline) | 3rd (Rank 3) | Captures short-term thermal acceleration |
+| 24h vibration volatility (raw absolute value) | 4th (Rank 4) | Enforces absolute fleet-wide vibration limits |
+| 24h temperature volatility (raw absolute value) | 5th (Rank 5) | Enforces absolute fleet-wide temperature limits |
+| Hours since last maintenance | Minimal (<0.1%) | Confirms leakage prevention; reactive resets provide little causal predictive signal |
 
 ### Model Selection & Validation Scheme
-Evaluation is conducted across a strict 80/20 chronological split and two expanding time-series cross-validation folds. A 24-hour embargo buffer purges training observations adjacent to split boundaries, preventing label contamination across temporal folds.
+Evaluation is conducted using an 80/20 chronological split and two expanding time-series cross-validation folds. A 24-hour buffer window is applied between training and test sets to prevent label contamination across split boundaries.
 
 #### Candidate Benchmark Comparison:
 
@@ -108,39 +108,39 @@ Evaluation is conducted across a strict 80/20 chronological split and two expand
 | XGBoost | 0.3202 | 0.5995 | 0.4559 | 0.4585 | 13 / 19 | 48 |
 | Ensemble (Averaged Probability) | 0.5030 | 0.6423 | 0.5884 | 0.5779 | 17 / 19 | 42 |
 
-**Selection Rationale:** The Random Forest classifier (300 estimators, `max_depth=8`, `min_samples_leaf=20`, balanced class weights) won on both primary objectives simultaneously: it detected 100% of tested failure events (19 of 19 across validation splits) while generating the lowest false alarm count (38 episodes). Row-level metrics can be deceptively optimistic (for example, Logistic Regression scored competitive hourly metrics while missing an entire breakdown event). Event-level validation was the decisive selection criterion.
+**Selection Rationale:** The Random Forest classifier (300 estimators, `max_depth=8`, `min_samples_leaf=20`, balanced class weights) delivered the strongest operational performance: it detected 100% of tested failure events (19 of 19 across validation splits) while generating the lowest false alarm count (38 episodes). Row-level metrics can be misleading; for example, Logistic Regression showed competitive hourly metrics but failed to detect one full breakdown event. Event-level evaluation was the decisive factor.
 
-### Operational Thresholds & Alert Economics
-Predictions are categorized into three operational tiers:
+### Operational Thresholds & Trade-offs
+Model predictions are mapped to three operational action levels:
 
 | Alert Band | Probability Cutoff | Fleet Hours Share | Action Protocol |
 |---|---|---|---|
-| **HIGH** | $\ge 0.20$ | ~2.8% | Immediate on-site physical inspection and parts preparation |
-| **WATCH** | $0.02 - 0.20$ | ~1.5% | Elevated telemetry monitoring across subsequent shift |
+| **HIGH** | $\ge 0.20$ | ~2.8% | Immediate physical inspection and parts staging |
+| **WATCH** | $0.02 - 0.20$ | ~1.5% | Heightened monitoring across upcoming shifts |
 | **LOW** | $< 0.02$ | ~95.7% | Standard operational baseline |
 
-**The Asymmetric Cost Rationale:** At the 0.20 operating threshold, precision is approximately 38% (roughly 3 out of 5 alert episodes are false alarms). In manufacturing plant operations, this asymmetry is intentional. A false alarm incurs a 15-minute diagnostic inspection by a shift technician. A missed breakdown results in hours of unplanned downtime, scrap material, and extensive mechanical damage. Prioritizing breakdown recall while containing alerts to under 3% of fleet runtime represents the optimal operational trade-off.
+**Operational Cost Consideration:** At the 0.20 operating threshold, precision is approximately 38% (roughly 3 out of 5 alert episodes do not result in a breakdown). In industrial plant environments, this trade-off is intentional. A false alert results in a 15-minute diagnostic inspection. A missed breakdown results in hours of unplanned downtime, scrap material, and equipment damage. Prioritizing breakdown recall while limiting alerts to under 3% of fleet operating hours provides a practical balance.
 
 **Lead-Time Metrics:**
 * **Cross-Validation Test Splits:** 16-hour minimum warning lead time prior to failure.
 * **Continuous Walk-Forward Historical Timeline:** 23-hour minimum warning lead time prior to failure.
 
 ### Dual-Scoring Strategy & Cold-Start Handling
-* **Dual Scoring:** Real-time monitoring uses the final model trained on all historical records (`models/current_scores.parquet`), while the UI activity timeline uses rolling out-of-sample walk-forward scoring (`models/historical_scores_oos.parquet`) to reflect strictly causal historical performance.
-* **Cold-Start Assets (`MCH-300`, `MCH-301`):** Assets with less than 24 hours of operating history default relative ratios to 1.0 (neutral), relying on raw telemetry boundaries. `machine_id` is excluded from model features to ensure generalizability, and cold-start assets are flagged with explicit UI confidence indicators.
+* **Dual Scoring:** Real-time fleet monitoring uses the model trained on all historical observations (`models/current_scores.parquet`), while the UI activity timeline uses rolling out-of-sample walk-forward scoring (`models/historical_scores_oos.parquet`) to reflect strictly causal historical outputs.
+* **Cold-Start Assets (`MCH-300`, `MCH-301`):** Assets with less than 24 hours of operating history default relative ratios to 1.0 (neutral), relying on raw telemetry boundaries. `machine_id` is excluded from model training features to allow generalization to unseen equipment, and cold-start assets are flagged with explicit confidence indicators in the user interface.
 
 ### Condition Monitoring & LLM Reasoning Layer
-The platform integrates Groq runtime inference (`openai/gpt-oss-120b`) for explainability and fleet auditing:
-* **Grounded Machine Explanations (`src/llm_explain.py`):** The backend builds a structured numeric telemetry snapshot per machine (current readings, baseline ratios, driver percentiles). The LLM translates these ratios into concise plain-language maintenance summaries. Verification scripts confirm that output wording dynamically varies with sensor severity rather than returning canned templates.
-* **Two-Stage Deterministic Q&A (`src/llm_qa.py`):** Stage 1 uses deterministic regex parsing to extract entities (machine IDs, production lines, risk tiers, dates, failure history) and query the parquet store directly. Stage 2 passes only the retrieved rows to the LLM with strict instructions to answer exclusively from evidence. The UI provides a provenance drawer displaying the exact records backing each response.
-* **Decoupled Resilience & Caching:** Dashboards, charts, and risk rankings function entirely independently of the LLM. Missing or invalid API keys do not impair core platform operations. Explanations are cached in memory per machine-hour, and upstream Groq rate limits (8,000 tokens/minute) are intercepted to return clean HTTP 429 advisories rather than raw provider errors.
+The platform integrates Groq runtime inference (`openai/gpt-oss-120b`) for explainability and fleet queries:
+* **Grounded Machine Explanations (`src/llm_explain.py`):** The backend builds a structured numeric telemetry snapshot per machine (current readings, baseline ratios, driver percentiles). The LLM translates these ratios into concise plain-language maintenance summaries rather than static response templates. Verification tests confirm that output text reflects underlying sensor severity.
+* **Two-Stage Deterministic Q&A (`src/llm_qa.py`):** Stage 1 uses deterministic regex parsing to extract entities (machine IDs, production lines, risk tiers, dates, failure history) and queries the parquet store directly. Stage 2 passes only the retrieved rows to the LLM with instructions to answer strictly from the provided records. The UI includes a provenance drawer displaying the exact records behind each response.
+* **Fault Tolerance & Caching:** Dashboards, sensor charts, and fleet rankings operate independently of the LLM service. Missing or invalid API keys do not interrupt core platform functionality. Explanations are cached in memory per machine-hour, and upstream Groq rate limits (8,000 tokens/minute) are caught to return clear HTTP 429 notices rather than exposing raw server errors.
 
 ---
 
 ## 3. How to Run
 
 ### Live Deployment
-The production application is deployed on Render via a multi-stage Docker container:
+The production application is deployed on Render using a multi-stage Docker container:
 * **Live Application URL:** [https://predictive-maintenance-ypxa.onrender.com/](https://predictive-maintenance-ypxa.onrender.com/)
 
 ### Prerequisites
@@ -217,11 +217,11 @@ python -m src.build_historical_scores # Compile rolling out-of-sample historical
 
 ### Current Operational Constraints & Trade-offs
 * **Sample Size Boundaries:** The historical dataset contains 17 failure events across 43,354 hours. While detecting 100% of tested breakdowns (19 of 19 validation events across folds) demonstrates strong empirical separation, this is a small-sample finding rather than a permanent guarantee. Ongoing model governance is required as operating runtime expands.
-* **False Alarm Overhead:** Operating at the 0.20 decision boundary produces an approximate 38% precision rate (~3 out of 5 alert episodes are false alarms). While operationally justified by the asymmetric cost of missed failures, this false positive rate requires transparent communication to prevent maintenance friction.
+* **False Alarm Overhead:** Operating at the 0.20 decision boundary produces an approximate 38% precision rate (~3 out of 5 alert episodes are false alarms). While operationally justified by the asymmetric cost of missed failures, this false positive rate requires clear communication with maintenance teams to ensure operational trust.
 * **Unvalidated Cold-Start Equipment:** With only 72 hours of operating telemetry and zero historical breakdown events, machines `MCH-300` and `MCH-301` are unvalidated against real failure signatures. Predictions on these units are marked as preliminary until assets establish sufficient individual baseline history.
 * **Walk-Forward Trend Horizon:** Out-of-sample historical trend scoring begins mid-timeline because early weeks must be reserved as initial training history before rolling retraining iterations can execute.
-* **Telemetry Gap Imputation Limits:** The current causal imputation scheme handles single isolated missing hours via linear interpolation. Sustained telemetry outages exceeding 6 continuous hours are not modeled and would require sensor-fault fallbacks.
-* **Single-Process In-Memory State:** Rate limiting and explanation caching are maintained in process memory. Multi-instance horizontal scaling would require centralized caching infrastructure.
+* **Missing Data Handling:** The current causal imputation scheme handles single isolated missing hours via linear interpolation. Sustained telemetry outages exceeding 6 continuous hours are not modeled and would require dedicated sensor-fault fallbacks.
+* **Process-Level Caching:** Rate limiting and explanation caching are maintained in process memory. Multi-instance horizontal scaling would require centralized caching infrastructure.
 
 ### Engineering Next Steps & Improvements
 With additional development time, the following enhancements would be prioritized:
